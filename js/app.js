@@ -50,17 +50,44 @@ const CebApi = (() => {
     return typeof YOUVERSION_APP_KEY !== "undefined" && YOUVERSION_APP_KEY;
   }
 
-  async function req(path) {
-    const res = await fetch(BASE + path, {
-      headers: { "X-YVP-App-Key": YOUVERSION_APP_KEY },
+  // 공식 SDK와 동일한 요청 형태: URLSearchParams 인코딩 + Installation-Id 헤더
+  async function req(path, params) {
+    const url = new URL(BASE + path);
+    if (params) {
+      Object.keys(params).forEach((k) => {
+        const v = params[k];
+        if (v == null) return;
+        if (Array.isArray(v)) v.forEach((item) => url.searchParams.append(k, String(item)));
+        else url.searchParams.append(k, String(v));
+      });
+    }
+    const res = await fetch(url.toString(), {
+      headers: {
+        "X-YVP-App-Key": YOUVERSION_APP_KEY,
+        "X-YVP-Installation-Id": "ceb-web-app",
+      },
     });
     if (res.status === 401 || res.status === 403) {
       throw new Error("YouVersion 앱 키가 거부되었습니다 (" + res.status +
         "). platform.youversion.com에서 키와 사용 권한을 확인해 주세요.");
     }
-    if (res.status === 404) throw new Error("본문이 없습니다 (404)");
-    if (!res.ok) throw new Error("YouVersion API 오류 (" + res.status + ")");
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = await res.json();
+        detail = body.message || body.error || "";
+      } catch (e) { /* 무시 */ }
+      throw new Error("YouVersion API 오류 (" + res.status + (detail ? ": " + detail : "") +
+        ") — " + path);
+    }
     return res.json();
+  }
+
+  function pickCeb(list) {
+    return (list || []).find((b) =>
+      (b.abbreviation || "").toUpperCase() === "CEB" ||
+      (b.localized_abbreviation || "").toUpperCase() === "CEB" ||
+      /common english bible/i.test(b.title || ""));
   }
 
   // 앱 키로 사용 가능한 영어 번역본 중에서 CEB를 찾는다 (localStorage에 캐시)
@@ -71,22 +98,39 @@ const CebApi = (() => {
         const cached = JSON.parse(localStorage.getItem("bible-app-ceb-version"));
         if (cached && cached.id) return cached;
       } catch (e) { /* 무시 */ }
-      let pageToken = "";
-      for (let page = 0; page < 10; page++) {
-        const json = await req("/v1/bibles?language_ranges[]=en&page_size=100" +
-          (pageToken ? "&page_token=" + encodeURIComponent(pageToken) : ""));
-        const list = json.data || [];
-        const ceb = list.find((b) =>
-          (b.abbreviation || "").toUpperCase() === "CEB" ||
-          /common english bible/i.test(b.title || ""));
-        if (ceb) {
-          const v = { id: ceb.id, copyright: ceb.copyright || "" };
-          try { localStorage.setItem("bible-app-ceb-version", JSON.stringify(v)); } catch (e) { /* 무시 */ }
-          return v;
+
+      const save = (b) => {
+        const v = { id: b.id, copyright: b.copyright || "" };
+        try { localStorage.setItem("bible-app-ceb-version", JSON.stringify(v)); } catch (e) { /* 무시 */ }
+        return v;
+      };
+
+      let listError = null;
+      try {
+        let pageToken = "";
+        for (let page = 0; page < 10; page++) {
+          const params = { "language_ranges[]": ["en"], page_size: 100 };
+          if (pageToken) params.page_token = pageToken;
+          const json = await req("/v1/bibles", params);
+          const ceb = pickCeb(json.data);
+          if (ceb) return save(ceb);
+          pageToken = json.next_page_token;
+          if (!pageToken) break;
         }
-        pageToken = json.next_page_token;
-        if (!pageToken) break;
+      } catch (e) {
+        listError = e;
       }
+
+      // 목록 조회가 실패하거나 목록에 없으면 CEB의 공개 버전 ID(37)로 직접 확인
+      try {
+        const b = await req("/v1/bibles/37");
+        if (/common english bible/i.test(b.title || "") ||
+            (b.abbreviation || "").toUpperCase() === "CEB") {
+          return save(b);
+        }
+      } catch (e) { /* 아래에서 종합 안내 */ }
+
+      if (listError) throw listError;
       throw new Error("이 앱 키로 사용할 수 있는 번역본 중에 Common English Bible이 없습니다. " +
         "platform.youversion.com에서 앱의 번역본 사용 범위를 확인해 주세요.");
     })();
@@ -128,8 +172,11 @@ const CebApi = (() => {
     if (chapterCache[key]) return chapterCache[key];
     const v = await getVersion();
     const usfm = USFM[book] + "." + ch;
-    const json = await req("/v1/bibles/" + v.id + "/passages/" + usfm +
-      "?format=html&include_headings=false&include_notes=false");
+    const json = await req("/v1/bibles/" + v.id + "/passages/" + usfm, {
+      format: "html",
+      include_headings: false,
+      include_notes: false,
+    });
     const parsed = parseChapterHtml(json.content || "");
     if (!parsed.verses.length) throw new Error("본문을 해석하지 못했습니다: " + usfm);
     parsed.copyright = v.copyright;
