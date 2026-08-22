@@ -545,7 +545,6 @@ function applyTheme() {
   const dark = state.theme === "dark" ||
     (state.theme === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  $("themeBtn").textContent = dark ? "☀️" : "🌙";
 }
 
 function applyFont() {
@@ -650,11 +649,6 @@ async function renderChapter(highlightVerse) {
       });
       openSettings("AI 번역을 사용하려면 API 키를 입력해 주세요.");
     } else {
-      const inf = AiTranslator.info();
-      const modelNote = el("div", "ai-model-note",
-        "AI 번역: " + inf.model + " (" + inf.providerLabel + ") — 참고용");
-      const firstVerse = reader.querySelector(".verse");
-      if (firstVerse) reader.insertBefore(modelNote, firstVerse);
       AiTranslator.translateChapter(state.version, state.book, state.chapter, meta, enVerses)
         .then((translated) => {
           if (token !== renderToken) return;
@@ -668,7 +662,6 @@ async function renderChapter(highlightVerse) {
         .catch((err) => {
           if (token !== renderToken) return;
           const msg = (err && err.message) || "AI 번역에 실패했습니다.";
-          modelNote.remove();
           reader.querySelectorAll(".verse-ai").forEach((n) => n.remove());
           const first = reader.querySelector(".verse");
           const notice = el("div", "ai-error", msg);
@@ -910,6 +903,11 @@ function populateModelSelect(models, selected) {
 function fillSettingsForm() {
   const p = settingsDraft.provider;
   const conf = settingsDraft[p];
+  $("themeSel").value = state.theme;
+  const inf = AiTranslator.info();
+  $("aiCurrentNote").textContent = AiTranslator.configured()
+    ? "현재 사용 중인 모델: " + inf.model + " (" + inf.providerLabel + ")"
+    : "아직 AI 번역이 설정되지 않았습니다.";
   $("aiProvider").value = p;
   $("aiKeySourceField").hidden = !Auth.enabled();
   $("aiKeySource").value = conf.useShared && Auth.enabled() ? "shared" : "own";
@@ -1163,9 +1161,8 @@ function init() {
     state.fontScale = Math.max(0.7, +(state.fontScale - 0.1).toFixed(2));
     applyFont(); saveState();
   });
-  $("themeBtn").addEventListener("click", () => {
-    const dark = document.documentElement.dataset.theme === "dark";
-    state.theme = dark ? "light" : "dark";
+  $("themeSel").addEventListener("change", (e) => {
+    state.theme = e.target.value;
     applyTheme(); saveState();
   });
 
