@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bible Canvas — 영어 성경과 한국어 번역 대조 읽기</title>
-<meta name="description" content="영어 성경(WEB·KJV·NIV·NASB) 본문을 한국어 번역(개역한글)과 AI 실시간 번역으로 절 단위로 나란히 읽는 웹앱">
+<meta name="description" content="영어 성경(WEB·KJV·NIV·NIrV·NASB·AMP·BSB)과 그리스어 신약 원문을 한국어 번역(개역한글)·AI 실시간 번역과 절 단위로 나란히 읽는 웹앱">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.json">
@@ -17,8 +17,7 @@
 </head>
 <body>
 <header class="topbar">
-  <button id="menuBtn" class="icon-btn" title="책 선택" aria-label="책 선택">☰</button>
-  <button id="refBtn" class="ref-btn" title="책/장 선택">
+  <button id="refBtn" class="ref-btn" title="책/장/절 선택">
     <span id="refText">요한복음 3장</span> <span class="caret">▾</span>
   </button>
   <div class="topbar-selects">
@@ -50,15 +49,6 @@
   </div>
 </header>
 
-<nav id="sidebar" class="sidebar" hidden>
-  <div class="sidebar-inner">
-    <div class="brand">📖 Bible Canvas</div>
-    <div class="testament-label">구약 (Old Testament)</div>
-    <div id="otList" class="book-list"></div>
-    <div class="testament-label">신약 (New Testament)</div>
-    <div id="ntList" class="book-list"></div>
-  </div>
-</nav>
 <div id="overlay" class="overlay" hidden></div>
 
 <div id="refPicker" class="chapter-picker ref-picker" hidden>
@@ -208,7 +198,7 @@
     <button id="nextBtn" class="pager-btn">다음 장 →</button>
   </div>
   <footer class="app-footer">
-    <p>영어 본문: World English Bible(퍼블릭 도메인) · King James Version · Common English Bible(온라인, <a href="https://platform.youversion.com" target="_blank" rel="noopener">YouVersion Platform</a> 제공) — 한국어 본문: 개역한글판(1961)</p>
+    <p>영어 본문: World English Bible(퍼블릭 도메인) · King James Version · NIV·NIrV·NASB·AMP·BSB·그리스어 신약(온라인, <a href="https://platform.youversion.com" target="_blank" rel="noopener">YouVersion Platform</a> 제공) — 한국어 본문: 개역한글판(1961)</p>
     <p>AI 번역은 선택한 영어 본문을 실시간으로 번역한 참고용 결과로, 정식 번역을 대체하지 않습니다.</p>
     <p>절 번호 매김은 번역본에 따라 일부 다를 수 있습니다. 절을 누르면 영·한 본문이 복사됩니다.</p>
   </footer>

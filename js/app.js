@@ -124,7 +124,7 @@ const CebApi = (() => {
       // 혹시 다른 ID로 등록돼 있을 수 있으니 목록도 확인 (빈 목록이면 204/null)
       let pageToken = "";
       for (let page = 0; page < 10; page++) {
-        const params = { "language_ranges[]": ["en"], page_size: 99 }; // API 최대치 99
+        const params = { "language_ranges[]": [meta.lang || "en"], page_size: 99 }; // API 최대치 99
         if (pageToken) params.page_token = pageToken;
         const json = await req("/v1/bibles", params);
         if (!json) break; // 204: 이 키로 열람 가능한 목록이 비어 있음
@@ -384,7 +384,8 @@ const AiTranslator = (() => {
       {
         role: "system",
         content:
-          "You are a professional Bible translator. Translate English Bible verses into natural, " +
+          "You are a professional Bible translator. Translate the given Bible verses " +
+          "(usually English, possibly Koine Greek) into natural, " +
           "faithful modern Korean (현대 한국어, 존댓말이 아닌 성경 문어체). Preserve meaning precisely; " +
           "do not add, omit, or interpret beyond the text. Keep proper nouns in standard Korean " +
           "Bible spelling (e.g., 예수, 여호와, 예루살렘). Return ONLY a JSON object of the form " +
@@ -629,6 +630,10 @@ let renderToken = 0;
 // 선택된 영어 번역본의 해당 장을 { verses, title } 형태로 반환
 async function loadEnglishChapter(book, chapter) {
   if (isOnlineVersion(state.version)) {
+    if (ONLINE_VERSIONS[state.version].ntOnly && book < 40) {
+      throw new Error(VERSIONS[state.version].label +
+        "은(는) 신약(마태복음~요한계시록)만 제공합니다. 구약은 다른 번역본을 선택해 주세요.");
+    }
     return CebApi.chapter(state.version, book, chapter);
   }
   const en = await BibleData.load(state.version, book);
@@ -755,7 +760,6 @@ async function renderChapter(highlightVerse) {
 
   location.hash = "#" + state.book + "/" + state.chapter + (highlightVerse ? "/" + highlightVerse : "");
   saveState();
-  renderBookListActive();
 
   if (highlightVerse) {
     const target = reader.querySelector('.verse[data-verse="' + highlightVerse + '"]');
@@ -809,28 +813,6 @@ function step(delta) {
     c = 1;
   }
   goTo(b, c);
-}
-
-/* ── 책 목록 / 장 선택 ─────────────────── */
-function buildBookList() {
-  const ot = $("otList"), nt = $("ntList");
-  BOOKS.forEach((b) => {
-    const btn = el("button", "book-item");
-    btn.dataset.book = b[0];
-    btn.appendChild(el("span", "ko", b[1]));
-    btn.appendChild(el("span", "en", b[2]));
-    btn.addEventListener("click", () => {
-      closePanels();
-      openRefPicker(b[0]);
-    });
-    (b[0] <= 39 ? ot : nt).appendChild(btn);
-  });
-}
-
-function renderBookListActive() {
-  document.querySelectorAll(".book-item").forEach((n) => {
-    n.classList.toggle("active", Number(n.dataset.book) === state.book);
-  });
 }
 
 /* ── 통합 책·장·절 선택 ─────────────────── */
@@ -921,15 +903,7 @@ function openRefPicker(bookId) {
   if (selCh) selCh.scrollIntoView({ block: "center" });
 }
 
-function openSidebar() {
-  $("overlay").hidden = false;
-  $("sidebar").hidden = false;
-  const active = document.querySelector(".book-item.active");
-  if (active) active.scrollIntoView({ block: "center" });
-}
-
 function closePanels() {
-  $("sidebar").hidden = true;
   $("refPicker").hidden = true;
   $("searchPanel").hidden = true;
   $("settingsPanel").hidden = true;
@@ -1325,7 +1299,6 @@ function init() {
 
   applyTheme();
   applyFont();
-  buildBookList();
 
   if (CebApi.enabled()) {
     Object.keys(ONLINE_VERSIONS).forEach((vkey) => {
@@ -1416,6 +1389,7 @@ function init() {
     const text = $("vmNote").value.trim();
     const ann = mutateVerseAnn({ n: text || null });
     renderVerseNote(verseCtx.row, ann && ann.n);
+    closePanels(); // 저장 후 패널을 닫아 본문의 노트가 바로 보이게
     toast(text ? "노트를 저장했습니다" : "노트를 삭제했습니다");
   });
   $("vmCopy").addEventListener("click", () => {
@@ -1429,7 +1403,6 @@ function init() {
     });
   });
 
-  $("menuBtn").addEventListener("click", openSidebar);
   $("refBtn").addEventListener("click", () => openRefPicker());
   $("overlay").addEventListener("click", closePanels);
   $("refPickerClose").addEventListener("click", closePanels);

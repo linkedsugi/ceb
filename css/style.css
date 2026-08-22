@@ -63,33 +63,10 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   border-radius: 8px; padding: 5px 6px;
 }
 
-/* ── 사이드바(책 목록) ─────────────────── */
-.sidebar {
-  position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
-  width: min(320px, 85vw);
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  overflow-y: auto;
-}
-.sidebar-inner { padding: 16px 12px 32px; }
-.brand {
-  font-weight: 800; font-size: 1.05rem; padding: 4px 8px 10px;
-  border-bottom: 1px solid var(--border); margin-bottom: 8px;
-}
 .testament-label {
   font-size: 0.8rem; font-weight: 700; color: var(--accent);
   letter-spacing: 0.05em; margin: 14px 8px 6px;
 }
-.book-list { display: flex; flex-direction: column; }
-.book-item {
-  display: flex; justify-content: space-between; align-items: baseline;
-  gap: 8px; text-align: left;
-  padding: 7px 10px; border-radius: 8px; width: 100%;
-}
-.book-item:hover { background: var(--accent-soft); }
-.book-item.active { background: var(--accent-soft); font-weight: 700; }
-.book-item .en { color: var(--text-sub); font-size: 0.78rem; white-space: nowrap; }
 .overlay {
   position: fixed; inset: 0; z-index: 40;
   background: rgba(0, 0, 0, 0.35);

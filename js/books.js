@@ -86,16 +86,28 @@ const VERSIONS = {
   krv: { label: "개역한글", full: "개역한글판 (1961)" },
   ceb: { label: "CEB", full: "Common English Bible (온라인, YouVersion)" },
   niv: { label: "NIV", full: "New International Version 2011 (온라인, YouVersion)" },
+  nirv: { label: "NIrV", full: "New International Reader's Version 2014 — 쉬운 영어 (온라인, YouVersion)" },
   nasb: { label: "NASB", full: "New American Standard Bible 2020 (온라인, YouVersion)" },
+  amp: { label: "AMP", full: "Amplified Bible (온라인, YouVersion)" },
+  bsb: { label: "BSB", full: "Berean Standard Bible (온라인, YouVersion)" },
+  grctr: { label: "그리스어 원문", full: "Scrivener's Textus Receptus 1894 — 그리스어 신약 원문 (온라인, YouVersion)" },
+  esv: { label: "ESV", full: "English Standard Version (온라인, YouVersion)" },
   nlt: { label: "NLT", full: "New Living Translation (온라인, YouVersion)" },
 };
 
 // YouVersion Platform에서 실시간으로 불러오는 번역본과 버전 ID
 // unavailable: 앱 키에 아직 라이선스가 없는 번역본 — 선택 불가로 표시.
-// 라이선스가 승인되면 이 플래그만 지우면 된다.
+//   라이선스가 승인되면 이 플래그만 지우면 된다.
+// ntOnly: 신약(마태복음 이후)만 제공하는 판본.
+// lang: 카탈로그 검색 시 사용할 언어 코드 (기본 en).
 const ONLINE_VERSIONS = {
-  ceb: { id: 37, pattern: /common english bible/i, unavailable: true },
   niv: { id: 111, pattern: /new international version/i },
+  nirv: { id: 110, pattern: /international reader/i },
   nasb: { id: 2692, pattern: /new american standard/i },
+  amp: { id: 1588, pattern: /amplified bible/i },
+  bsb: { id: 3034, pattern: /berean standard/i },
+  grctr: { id: 183, pattern: /textus receptus 1894/i, lang: "grc", ntOnly: true },
+  ceb: { id: 37, pattern: /common english bible/i, unavailable: true },
+  esv: { id: 59, pattern: /english standard version/i, unavailable: true },
   nlt: { id: 116, pattern: /new living translation/i, unavailable: true },
 };
