@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>영한 성경 — 영어 성경과 한국어 번역 대조 읽기</title>
+<meta name="description" content="공개 영어 성경(WEB/KJV) 본문을 한국어 번역(개역한글)과 절 단위로 나란히 읽는 웹앱">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <button id="menuBtn" class="icon-btn" title="책 선택" aria-label="책 선택">☰</button>
+  <button id="refBtn" class="ref-btn" title="책/장 선택">
+    <span id="refText">요한복음 3장</span> <span class="caret">▾</span>
+  </button>
+  <div class="topbar-right">
+    <select id="versionSel" class="sel" title="영어 번역본">
+      <option value="web">WEB</option>
+      <option value="kjv">KJV</option>
+    </select>
+    <select id="modeSel" class="sel" title="보기 모드">
+      <option value="both">영·한 대조</option>
+      <option value="en">영어만</option>
+      <option value="ko">한국어만</option>
+    </select>
+    <button id="searchBtn" class="icon-btn" title="검색" aria-label="검색">🔍</button>
+    <button id="fontMinus" class="icon-btn" title="글자 작게" aria-label="글자 작게">A−</button>
+    <button id="fontPlus" class="icon-btn" title="글자 크게" aria-label="글자 크게">A+</button>
+    <button id="themeBtn" class="icon-btn" title="다크 모드" aria-label="다크 모드">🌙</button>
+  </div>
+</header>
+
+<nav id="sidebar" class="sidebar" hidden>
+  <div class="sidebar-inner">
+    <div class="testament-label">구약 (Old Testament)</div>
+    <div id="otList" class="book-list"></div>
+    <div class="testament-label">신약 (New Testament)</div>
+    <div id="ntList" class="book-list"></div>
+  </div>
+</nav>
+<div id="overlay" class="overlay" hidden></div>
+
+<div id="chapterPicker" class="chapter-picker" hidden>
+  <div class="chapter-picker-head">
+    <span id="chapterPickerTitle"></span>
+    <button id="chapterPickerClose" class="icon-btn" aria-label="닫기">✕</button>
+  </div>
+  <div id="chapterGrid" class="chapter-grid"></div>
+</div>
+
+<div id="searchPanel" class="search-panel" hidden>
+  <div class="search-head">
+    <input id="searchInput" type="search" placeholder="검색어 입력 (한국어 또는 영어)" autocomplete="off">
+    <button id="searchClose" class="icon-btn" aria-label="검색 닫기">✕</button>
+  </div>
+  <div id="searchStatus" class="search-status"></div>
+  <div id="searchResults" class="search-results"></div>
+</div>
+
+<main id="main" class="main">
+  <div id="reader" class="reader">
+    <div class="loading">불러오는 중…</div>
+  </div>
+  <div class="pager">
+    <button id="prevBtn" class="pager-btn">← 이전 장</button>
+    <button id="nextBtn" class="pager-btn">다음 장 →</button>
+  </div>
+  <footer class="app-footer">
+    <p>영어 본문: World English Bible(퍼블릭 도메인) · King James Version — 한국어 본문: 개역한글판(1961)</p>
+    <p>절 번호 매김은 번역본에 따라 일부 다를 수 있습니다. 절을 누르면 영·한 본문이 복사됩니다.</p>
+  </footer>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/books.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
