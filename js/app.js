@@ -109,7 +109,7 @@ const CebApi = (() => {
       try {
         let pageToken = "";
         for (let page = 0; page < 10; page++) {
-          const params = { "language_ranges[]": ["en"], page_size: 100 };
+          const params = { "language_ranges[]": ["en"], page_size: 99 }; // API 최대치 99
           if (pageToken) params.page_token = pageToken;
           const json = await req("/v1/bibles", params);
           const ceb = pickCeb(json.data);
@@ -243,52 +243,90 @@ const AiTranslator = (() => {
     } catch (e) { /* 무시 */ }
 
     const numbered = enVerses.map((v, i) => (i + 1) + ". " + (v || "")).join("\n");
-    const body = {
-      model: s.model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a professional Bible translator. Translate English Bible verses into natural, " +
-            "faithful modern Korean (현대 한국어, 존댓말이 아닌 성경 문어체). Preserve meaning precisely; " +
-            "do not add, omit, or interpret beyond the text. Keep proper nouns in standard Korean " +
-            "Bible spelling (e.g., 예수, 여호와, 예루살렘). Return ONLY a JSON object of the form " +
-            '{"verses": ["...", ...]} with exactly one Korean string per input verse, in order. ' +
-            "If an input verse is empty, return an empty string for it.",
-        },
-        {
-          role: "user",
-          content: meta[2] + " chapter " + chapter + " (" + enVerses.length + " verses):\n" + numbered,
-        },
-      ],
-    };
-
-    const res = await fetch(s.base + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + s.key,
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are a professional Bible translator. Translate English Bible verses into natural, " +
+          "faithful modern Korean (현대 한국어, 존댓말이 아닌 성경 문어체). Preserve meaning precisely; " +
+          "do not add, omit, or interpret beyond the text. Keep proper nouns in standard Korean " +
+          "Bible spelling (e.g., 예수, 여호와, 예루살렘). Return ONLY a JSON object of the form " +
+          '{"verses": ["...", ...]} with exactly one Korean string per input verse, in order. ' +
+          "If an input verse is empty, return an empty string for it.",
       },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 401) throw new Error("AI API 키가 거부되었습니다(401). ⚙️ 설정에서 키를 확인해 주세요.");
-    if (res.status === 404) throw new Error("모델을 찾을 수 없습니다(404). ⚙️ 설정에서 모델 이름을 확인해 주세요.");
-    if (res.status === 429) throw new Error("AI API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.");
-    if (!res.ok) throw new Error("AI 번역 요청 실패 (" + res.status + ")");
-    const json = await res.json();
+      {
+        role: "user",
+        content: meta[2] + " chapter " + chapter + " (" + enVerses.length + " verses):\n" + numbered,
+      },
+    ];
+
+    // 모델(특히 GPT-5 계열)에 따라 temperature나 response_format을 거부하므로
+    // 최소 파라미터로 요청하고, response_format이 거부되면 없이 재시도한다.
+    async function call(useJsonFormat) {
+      const body = { model: s.model, messages };
+      if (useJsonFormat) body.response_format = { type: "json_object" };
+      const res = await fetch(s.base + "/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + s.key,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let apiMsg = "";
+        try {
+          const j = await res.json();
+          apiMsg = (j.error && j.error.message) || j.message || "";
+        } catch (e) { /* 무시 */ }
+        let text;
+        if (res.status === 401) text = "AI API 키가 거부되었습니다(401). ⚙️ 설정에서 키를 확인해 주세요.";
+        else if (res.status === 404) text = "모델 「" + s.model + "」을 찾을 수 없습니다(404). ⚙️ 설정에서 모델 이름을 확인해 주세요.";
+        else if (res.status === 429) text = "AI API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.";
+        else text = "AI 번역 요청 실패 (" + res.status + ")";
+        if (apiMsg) text += " — " + apiMsg;
+        const err = new Error(text);
+        err.status = res.status;
+        err.apiMessage = apiMsg;
+        throw err;
+      }
+      return res.json();
+    }
+
+    let json;
+    try {
+      json = await call(true);
+    } catch (err) {
+      // response_format을 지원하지 않는 모델/게이트웨이면 없이 다시 시도
+      if (err.status === 400 && /response_format|json_object/i.test(err.apiMessage || "")) {
+        json = await call(false);
+      } else {
+        throw err;
+      }
+    }
     const content = json.choices && json.choices[0] && json.choices[0].message &&
       json.choices[0].message.content;
     if (!content) throw new Error("AI 응답이 비어 있습니다.");
 
-    let verses;
-    try {
-      const parsed = JSON.parse(content);
-      verses = Array.isArray(parsed) ? parsed : parsed.verses;
-    } catch (e) {
+    // 코드 펜스나 앞뒤 설명이 붙어도 JSON 부분만 추출해 해석
+    function extractJson(text) {
+      let t = String(text).trim();
+      const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fence) t = fence[1].trim();
+      try { return JSON.parse(t); } catch (e) { /* 아래 폴백 */ }
+      const a = t.indexOf("{"), b = t.lastIndexOf("}");
+      if (a >= 0 && b > a) {
+        try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { /* 아래 폴백 */ }
+      }
+      const c = t.indexOf("["), d = t.lastIndexOf("]");
+      if (c >= 0 && d > c) {
+        try { return JSON.parse(t.slice(c, d + 1)); } catch (e) { /* 실패 */ }
+      }
       throw new Error("AI 응답을 해석하지 못했습니다.");
     }
+
+    const parsed = extractJson(content);
+    let verses = Array.isArray(parsed) ? parsed : parsed.verses;
     if (!Array.isArray(verses) || !verses.length) throw new Error("AI 응답 형식이 올바르지 않습니다.");
     verses = enVerses.map((_, i) => String(verses[i] == null ? "" : verses[i]).trim());
 
