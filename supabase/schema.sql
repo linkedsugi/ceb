@@ -58,6 +58,16 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- 관리자 계정은 항상 기본 승인 + 공용API 허용 상태로 보정
+-- (트리거 설치 전에 가입했거나 컬럼이 나중에 추가된 경우 대비)
+insert into public.profiles (id, email, display_name, approved, shared_key_access)
+select u.id, u.email,
+       coalesce(u.raw_user_meta_data ->> 'full_name', u.email), true, true
+from auth.users u
+where u.email = 'linkedsugi@gmail.com'
+on conflict (id) do update
+  set approved = true, shared_key_access = true;
+
 -- ── 공유 API 키 (승인된 회원만 읽기, 관리자만 쓰기) ──
 create table if not exists public.shared_keys (
   provider text primary key check (provider in ('openai', 'gemini')),

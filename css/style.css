@@ -261,9 +261,29 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .member-badge.ok { background: var(--accent-soft); color: var(--accent); }
 .member-badge.wait { border: 1px solid var(--border); color: var(--text-sub); }
-.member-badges { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
-.member-actions { display: flex; flex-direction: column; gap: 4px; }
-.member-toggle { padding: 5px 10px; font-size: 0.78rem; white-space: nowrap; }
+.member-row.pending { border-color: var(--accent); background: var(--accent-soft); }
+.admin-summary { color: var(--text-sub); font-size: 0.82rem; margin-bottom: 2px; }
+
+/* 토글 스위치 */
+.switch-group {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 48px;
+}
+.switch-caption { font-size: 0.68rem; color: var(--text-sub); white-space: nowrap; }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: var(--border); transition: background 0.15s; cursor: pointer;
+}
+.slider::before {
+  content: ""; position: absolute; width: 16px; height: 16px;
+  left: 3px; top: 3px; border-radius: 50%; background: #fff;
+  transition: transform 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+.switch input:disabled + .slider { opacity: 0.55; cursor: default; }
 .admin-keys { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
 
 /* ── AI 번역 설정 ───────────────────── */

@@ -972,58 +972,81 @@ async function openAdminPanel() {
   }
 }
 
+// 토글 스위치 하나 (캡션 포함). onChange가 없으면 잠긴 상태로 표시.
+function memberSwitch(caption, checked, disabled, title, onChange) {
+  const group = el("div", "switch-group");
+  const sw = el("label", "switch");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = checked;
+  input.disabled = disabled;
+  sw.title = title || "";
+  sw.appendChild(input);
+  sw.appendChild(el("span", "slider"));
+  group.appendChild(sw);
+  group.appendChild(el("span", "switch-caption", caption));
+  if (onChange) {
+    input.addEventListener("change", () => onChange(input));
+  }
+  return group;
+}
+
 function renderMembers(profiles) {
   const box = $("adminMembers");
   box.innerHTML = "";
+  const pendingCount = profiles.filter((p) => !p.approved).length;
+  box.appendChild(el("div", "admin-summary",
+    "회원 " + profiles.length + "명" +
+    (pendingCount ? " · 승인 대기 " + pendingCount + "명" : "")));
   if (!profiles.length) {
-    box.textContent = "아직 가입한 회원이 없습니다.";
+    box.appendChild(el("div", "settings-note", "아직 가입한 회원이 없습니다."));
     return;
   }
   profiles.forEach((p) => {
-    const row = el("div", "member-row");
+    const isAdminRow = p.email === ADMIN_EMAIL;
+    const row = el("div", "member-row" + (!p.approved && !isAdminRow ? " pending" : ""));
     const info = el("div", "member-info");
     info.appendChild(el("div", "member-email",
-      p.email + (p.email === ADMIN_EMAIL ? " (관리자)" : "")));
+      p.email + (isAdminRow ? " (관리자)" : "")));
     info.appendChild(el("div", "member-meta",
-      (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10)));
+      (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10) +
+      (!p.approved && !isAdminRow ? " · 승인 대기" : "")));
     row.appendChild(info);
-    const badges = el("div", "member-badges");
-    badges.appendChild(el("span", "member-badge " + (p.approved ? "ok" : "wait"),
-      p.approved ? "승인됨" : "대기"));
-    badges.appendChild(el("span", "member-badge " + (p.shared_key_access ? "ok" : "wait"),
-      p.shared_key_access ? "공용API ○" : "공용API ✕"));
-    row.appendChild(badges);
-    if (p.email !== ADMIN_EMAIL) {
-      const actions = el("div", "member-actions");
-      const approveBtn = el("button", "pager-btn member-toggle", p.approved ? "차단" : "승인");
-      approveBtn.addEventListener("click", async () => {
-        approveBtn.disabled = true;
-        try {
-          await Auth.setApproved(p.id, !p.approved);
-          toast(p.email + (p.approved ? " 차단됨" : " 승인됨"));
-          openAdminPanel();
-        } catch (err) {
-          toast(err.message);
-          approveBtn.disabled = false;
-        }
-      });
-      actions.appendChild(approveBtn);
-      const sharedBtn = el("button", "pager-btn member-toggle",
-        p.shared_key_access ? "공용API 해제" : "공용API 허용");
-      sharedBtn.title = "관리자가 등록한 공유 API 키 사용 권한";
-      sharedBtn.addEventListener("click", async () => {
-        sharedBtn.disabled = true;
-        try {
-          await Auth.setSharedAccess(p.id, !p.shared_key_access);
-          toast(p.email + (p.shared_key_access ? " 공용API 해제됨" : " 공용API 허용됨"));
-          openAdminPanel();
-        } catch (err) {
-          toast(err.message);
-          sharedBtn.disabled = false;
-        }
-      });
-      actions.appendChild(sharedBtn);
-      row.appendChild(actions);
+
+    if (isAdminRow) {
+      // 관리자는 항상 승인·공용API 허용 상태
+      row.appendChild(memberSwitch("승인", true, true, "관리자는 항상 승인 상태입니다"));
+      row.appendChild(memberSwitch("공용API", true, true, "관리자는 항상 공용API를 쓸 수 있습니다"));
+    } else {
+      row.appendChild(memberSwitch("승인", !!p.approved, false,
+        "가입 승인 (끄면 차단)", async (input) => {
+          input.disabled = true;
+          try {
+            await Auth.setApproved(p.id, input.checked);
+            p.approved = input.checked;
+            row.classList.toggle("pending", !p.approved);
+            toast(p.email + (p.approved ? " 승인됨" : " 차단됨"));
+          } catch (err) {
+            input.checked = !input.checked;
+            toast(err.message);
+          } finally {
+            input.disabled = false;
+          }
+        }));
+      row.appendChild(memberSwitch("공용API", !!p.shared_key_access, false,
+        "관리자가 등록한 공유 API 키 사용 권한", async (input) => {
+          input.disabled = true;
+          try {
+            await Auth.setSharedAccess(p.id, input.checked);
+            p.shared_key_access = input.checked;
+            toast(p.email + (p.shared_key_access ? " 공용API 허용됨" : " 공용API 해제됨"));
+          } catch (err) {
+            input.checked = !input.checked;
+            toast(err.message);
+          } finally {
+            input.disabled = false;
+          }
+        }));
     }
     box.appendChild(row);
   });
