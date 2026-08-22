@@ -37,6 +37,104 @@ const BibleData = (() => {
   return { register, load, store };
 })();
 
+/* ── API.Bible (Common English Bible 온라인) ─────
+ * CEB는 저작권 번역이라 본문을 내장할 수 없고,
+ * 사용자 브라우저에서 API.Bible을 직접 호출해 표시한다.
+ */
+const CebApi = (() => {
+  const BASE = "https://api.scripture.api.bible/v1";
+  const chapterCache = {}; // "book:chapter" -> { verses, title }
+  let bibleIdPromise = null;
+
+  function enabled() {
+    return typeof API_BIBLE_KEY !== "undefined" && API_BIBLE_KEY;
+  }
+
+  async function req(path) {
+    const res = await fetch(BASE + path, { headers: { "api-key": API_BIBLE_KEY } });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("API 키가 거부되었습니다 (" + res.status + "). 키 또는 사용 권한을 확인해 주세요.");
+    }
+    if (!res.ok) throw new Error("API.Bible 오류 (" + res.status + ")");
+    const json = await res.json();
+    reportFums(json.meta);
+    return json;
+  }
+
+  // API.Bible 이용 조건인 FUMS(사용량 집계) 픽셀 보고
+  function reportFums(meta) {
+    if (meta && meta.fumsNoScript) {
+      try { $("fums").innerHTML = meta.fumsNoScript; } catch (e) { /* 무시 */ }
+    }
+  }
+
+  // 키에 허용된 성경 목록에서 CEB의 ID를 찾는다 (localStorage에 캐시)
+  function getBibleId() {
+    if (bibleIdPromise) return bibleIdPromise;
+    bibleIdPromise = (async () => {
+      try {
+        const cached = localStorage.getItem("bible-app-ceb-id");
+        if (cached) return cached;
+      } catch (e) { /* 무시 */ }
+      const json = await req("/bibles?language=eng");
+      const list = json.data || [];
+      const ceb = list.find((b) => /common english bible/i.test(b.name || "")) ||
+                  list.find((b) => (b.abbreviation || "").toUpperCase() === "CEB");
+      if (!ceb) {
+        throw new Error("이 API 키로는 Common English Bible을 사용할 수 없습니다. " +
+          "API.Bible 대시보드에서 CEB 사용 신청이 승인되었는지 확인해 주세요.");
+      }
+      try { localStorage.setItem("bible-app-ceb-id", ceb.id); } catch (e) { /* 무시 */ }
+      return ceb.id;
+    })();
+    bibleIdPromise.catch(() => { bibleIdPromise = null; }); // 실패 시 다음에 재시도
+    return bibleIdPromise;
+  }
+
+  // "[1] 본문 [2] 본문…" 형태의 텍스트를 절 배열로 파싱
+  function parseContent(content) {
+    const parts = String(content).split(/\s*\[(\d+)\]\s*/);
+    const verses = [];
+    const title = parts[0] ? parts[0].replace(/\s+/g, " ").trim() : "";
+    for (let i = 1; i + 1 <= parts.length - 1; i += 2) {
+      verses[Number(parts[i]) - 1] = parts[i + 1].replace(/\s+/g, " ").trim();
+    }
+    for (let i = 0; i < verses.length; i++) if (verses[i] == null) verses[i] = "";
+    return { verses, title };
+  }
+
+  async function chapter(book, ch) {
+    const key = book + ":" + ch;
+    if (chapterCache[key]) return chapterCache[key];
+    const id = await getBibleId();
+    const chapterId = USFM[book] + "." + ch;
+    const json = await req("/bibles/" + id + "/chapters/" + chapterId +
+      "?content-type=text&include-verse-numbers=true&include-titles=false" +
+      "&include-notes=false&include-chapter-numbers=false");
+    const parsed = parseContent(json.data && json.data.content);
+    if (!parsed.verses.length) throw new Error("본문을 해석하지 못했습니다: " + chapterId);
+    chapterCache[key] = parsed;
+    return parsed;
+  }
+
+  async function search(q, limit) {
+    const id = await getBibleId();
+    const json = await req("/bibles/" + id + "/search?query=" +
+      encodeURIComponent(q) + "&limit=" + (limit || 100) + "&sort=canonical");
+    const verses = (json.data && json.data.verses) || [];
+    const byCode = {};
+    USFM.forEach((code, i) => { if (code) byCode[code] = i; });
+    return verses.map((v) => {
+      const p = String(v.id || "").split("."); // 예: JHN.3.16
+      const book = byCode[p[0]];
+      if (!book) return null;
+      return { book, chapter: Number(p[1]), verse: Number(p[2]), text: v.text || "" };
+    }).filter(Boolean);
+  }
+
+  return { enabled, chapter, search };
+})();
+
 /* ── 상태 ─────────────────────────────── */
 const state = {
   book: 43,       // 요한복음
@@ -98,9 +196,24 @@ function applyFont() {
 }
 
 /* ── 본문 렌더링 ────────────────────────── */
+let renderToken = 0;
+
+// 선택된 영어 번역본의 해당 장을 { verses, title } 형태로 반환
+async function loadEnglishChapter(book, chapter) {
+  if (state.version === "ceb") {
+    return CebApi.chapter(book, chapter);
+  }
+  const en = await BibleData.load(state.version, book);
+  return {
+    verses: en.chapters[chapter - 1] || [],
+    title: (en.titles && en.titles[String(chapter)]) || "",
+  };
+}
+
 async function renderChapter(highlightVerse) {
   const meta = bookMeta(state.book);
   const reader = $("reader");
+  const token = ++renderToken;
   $("refText").textContent = meta[1] + " " + state.chapter + "장";
   document.title = meta[1] + " " + state.chapter + "장 — 영한 성경";
   reader.className = "reader mode-" + state.mode;
@@ -109,19 +222,31 @@ async function renderChapter(highlightVerse) {
   let en, ko;
   try {
     [en, ko] = await Promise.all([
-      BibleData.load(state.version, state.book),
+      loadEnglishChapter(state.book, state.chapter),
       BibleData.load("krv", state.book),
     ]);
   } catch (err) {
+    if (token !== renderToken) return;
     reader.innerHTML = "";
-    const msg = el("div", "loading",
-      "본문을 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 새로고침해 주세요.");
-    reader.appendChild(msg);
+    reader.appendChild(el("div", "loading",
+      "본문을 불러오지 못했습니다. " + (err && err.message ? err.message : "")));
+    if (state.version === "ceb") {
+      const back = el("button", "pager-btn", "WEB(오프라인) 번역으로 보기");
+      back.style.display = "block";
+      back.style.margin = "0 auto";
+      back.addEventListener("click", () => {
+        state.version = "web";
+        $("versionSel").value = "web";
+        renderChapter();
+      });
+      reader.appendChild(back);
+    }
     return;
   }
+  if (token !== renderToken) return;
 
   const ci = state.chapter - 1;
-  const enVerses = en.chapters[ci] || [];
+  const enVerses = en.verses;
   const koVerses = ko.chapters[ci] || [];
   const count = Math.max(enVerses.length, koVerses.length);
 
@@ -131,9 +256,8 @@ async function renderChapter(highlightVerse) {
   heading.appendChild(sub);
   reader.appendChild(heading);
 
-  const psalmTitle = en.titles && en.titles[String(state.chapter)];
-  if (psalmTitle && state.mode !== "ko") {
-    reader.appendChild(el("div", "psalm-title", psalmTitle));
+  if (en.title && state.mode !== "ko") {
+    reader.appendChild(el("div", "psalm-title", en.title));
   }
 
   for (let v = 0; v < count; v++) {
@@ -283,6 +407,32 @@ async function runSearch() {
   let hits = 0;
 
   status.textContent = "검색 중…";
+
+  // CEB(온라인)는 API.Bible 검색 엔드포인트 사용
+  if (version === "ceb") {
+    try {
+      const results = await CebApi.search(q, MAX);
+      if (token !== searchToken) return;
+      results.forEach((r) => {
+        const meta = bookMeta(r.book);
+        const hit = el("button", "search-hit");
+        hit.appendChild(el("div", "ref", meta[1] + " " + r.chapter + ":" + r.verse));
+        hit.appendChild(el("div", "snippet", r.text.slice(0, 160)));
+        hit.addEventListener("click", () => {
+          closePanels();
+          goTo(r.book, r.chapter, r.verse);
+        });
+        box.appendChild(hit);
+      });
+      status.textContent = results.length === 0
+        ? "「" + q + "」 검색 결과가 없습니다. (CEB)"
+        : "「" + q + "」 " + results.length + "건 — CEB";
+    } catch (err) {
+      if (token !== searchToken) return;
+      status.textContent = "CEB 검색 실패: " + (err && err.message ? err.message : "네트워크 오류");
+    }
+    return;
+  }
   for (let b = 1; b <= 66 && hits < MAX; b++) {
     let data;
     try {
@@ -344,6 +494,16 @@ function init() {
   applyTheme();
   applyFont();
   buildBookList();
+
+  if (CebApi.enabled()) {
+    const opt = document.createElement("option");
+    opt.value = "ceb";
+    opt.textContent = "CEB";
+    opt.title = VERSIONS.ceb.full;
+    $("versionSel").appendChild(opt);
+  } else if (state.version === "ceb") {
+    state.version = "web"; // 키가 제거된 경우
+  }
 
   $("versionSel").value = state.version;
   $("modeSel").value = state.mode;

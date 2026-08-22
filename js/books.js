@@ -69,8 +69,20 @@ const BOOKS = [
   [66, "요한계시록", "Revelation", 22],
 ];
 
+// 책 번호(1–66) → USFM/Paratext 책 코드 (API.Bible 챕터 ID에 사용)
+const USFM = [null,
+  "GEN","EXO","LEV","NUM","DEU","JOS","JDG","RUT","1SA","2SA",
+  "1KI","2KI","1CH","2CH","EZR","NEH","EST","JOB","PSA","PRO",
+  "ECC","SNG","ISA","JER","LAM","EZK","DAN","HOS","JOL","AMO",
+  "OBA","JON","MIC","NAM","HAB","ZEP","HAG","ZEC","MAL","MAT",
+  "MRK","LUK","JHN","ACT","ROM","1CO","2CO","GAL","EPH","PHP",
+  "COL","1TH","2TH","1TI","2TI","TIT","PHM","HEB","JAS","1PE",
+  "2PE","1JN","2JN","3JN","JUD","REV",
+];
+
 const VERSIONS = {
   web: { label: "WEB", full: "World English Bible (현대 영어)" },
   kjv: { label: "KJV", full: "King James Version (1611)" },
   krv: { label: "개역한글", full: "개역한글판 (1961)" },
+  ceb: { label: "CEB", full: "Common English Bible (온라인, API.Bible)" },
 };
