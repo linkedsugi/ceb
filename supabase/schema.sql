@@ -15,9 +15,14 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   display_name text,
-  approved boolean not null default false,
+  approved boolean not null default false,           -- 회원 승인 (가입 허용)
+  shared_key_access boolean not null default false,  -- 공용 API 키 사용 허용
   created_at timestamptz not null default now()
 );
+
+-- 기존 설치본 업그레이드용 (없으면 컬럼 추가)
+alter table public.profiles
+  add column if not exists shared_key_access boolean not null default false;
 
 alter table public.profiles enable row level security;
 
@@ -35,11 +40,12 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, display_name, approved)
+  insert into public.profiles (id, email, display_name, approved, shared_key_access)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'full_name', new.email),
+    new.email = 'linkedsugi@gmail.com',
     new.email = 'linkedsugi@gmail.com'
   )
   on conflict (id) do nothing;
@@ -68,7 +74,7 @@ create policy "shared_keys approved read" on public.shared_keys
     public.is_admin()
     or exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.approved
+      where p.id = auth.uid() and p.approved and p.shared_key_access
     )
   );
 

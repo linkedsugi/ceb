@@ -843,22 +843,43 @@ function renderMembers(profiles) {
     info.appendChild(el("div", "member-meta",
       (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10)));
     row.appendChild(info);
-    row.appendChild(el("span", "member-badge " + (p.approved ? "ok" : "wait"),
+    const badges = el("div", "member-badges");
+    badges.appendChild(el("span", "member-badge " + (p.approved ? "ok" : "wait"),
       p.approved ? "승인됨" : "대기"));
+    badges.appendChild(el("span", "member-badge " + (p.shared_key_access ? "ok" : "wait"),
+      p.shared_key_access ? "공용API ○" : "공용API ✕"));
+    row.appendChild(badges);
     if (p.email !== ADMIN_EMAIL) {
-      const btn = el("button", "pager-btn member-toggle", p.approved ? "차단" : "승인");
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
+      const actions = el("div", "member-actions");
+      const approveBtn = el("button", "pager-btn member-toggle", p.approved ? "차단" : "승인");
+      approveBtn.addEventListener("click", async () => {
+        approveBtn.disabled = true;
         try {
           await Auth.setApproved(p.id, !p.approved);
           toast(p.email + (p.approved ? " 차단됨" : " 승인됨"));
           openAdminPanel();
         } catch (err) {
           toast(err.message);
-          btn.disabled = false;
+          approveBtn.disabled = false;
         }
       });
-      row.appendChild(btn);
+      actions.appendChild(approveBtn);
+      const sharedBtn = el("button", "pager-btn member-toggle",
+        p.shared_key_access ? "공용API 해제" : "공용API 허용");
+      sharedBtn.title = "관리자가 등록한 공유 API 키 사용 권한";
+      sharedBtn.addEventListener("click", async () => {
+        sharedBtn.disabled = true;
+        try {
+          await Auth.setSharedAccess(p.id, !p.shared_key_access);
+          toast(p.email + (p.shared_key_access ? " 공용API 해제됨" : " 공용API 허용됨"));
+          openAdminPanel();
+        } catch (err) {
+          toast(err.message);
+          sharedBtn.disabled = false;
+        }
+      });
+      actions.appendChild(sharedBtn);
+      row.appendChild(actions);
     }
     box.appendChild(row);
   });
