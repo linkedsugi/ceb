@@ -91,9 +91,11 @@ const VERSIONS = {
 };
 
 // YouVersion Platform에서 실시간으로 불러오는 번역본과 버전 ID
+// unavailable: 앱 키에 아직 라이선스가 없는 번역본 — 선택 불가로 표시.
+// 라이선스가 승인되면 이 플래그만 지우면 된다.
 const ONLINE_VERSIONS = {
-  ceb: { id: 37, pattern: /common english bible/i },
+  ceb: { id: 37, pattern: /common english bible/i, unavailable: true },
   niv: { id: 111, pattern: /new international version/i },
   nasb: { id: 2692, pattern: /new american standard/i },
-  nlt: { id: 116, pattern: /new living translation/i },
+  nlt: { id: 116, pattern: /new living translation/i, unavailable: true },
 };

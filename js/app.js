@@ -939,12 +939,16 @@ function init() {
     Object.keys(ONLINE_VERSIONS).forEach((vkey) => {
       const opt = document.createElement("option");
       opt.value = vkey;
-      opt.textContent = VERSIONS[vkey].label;
+      opt.textContent = VERSIONS[vkey].label +
+        (ONLINE_VERSIONS[vkey].unavailable ? " (currently unavailable)" : "");
       opt.title = VERSIONS[vkey].full;
+      if (ONLINE_VERSIONS[vkey].unavailable) opt.disabled = true;
       $("versionSel").appendChild(opt);
     });
-  } else if (isOnlineVersion(state.version)) {
-    state.version = "web"; // 키가 제거된 경우
+  }
+  if (isOnlineVersion(state.version) &&
+      (!CebApi.enabled() || ONLINE_VERSIONS[state.version].unavailable)) {
+    state.version = "web"; // 키가 없거나 사용 불가 번역본이 저장돼 있던 경우
   }
 
   $("versionSel").value = state.version;
