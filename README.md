@@ -11,16 +11,17 @@
 > 이며, 선택한 영어 본문을 **AI(OpenAI 호환 API)로 실시간 번역**해 함께 볼 수도
 > 있습니다.
 
-## CEB (온라인) 설정
+## 온라인 번역본 (CEB · NIV · NASB · NLT) 설정
 
 `js/config.js`의 `YOUVERSION_APP_KEY`에 [YouVersion Platform](https://platform.youversion.com/platform/apps)
-앱 키를 넣으면 번역본 선택에 **CEB** 옵션이 나타납니다. 앱은 사용자의
-브라우저에서 `api.youversion.com`을 직접 호출해(`X-YVP-App-Key` 헤더) CEB의
-버전 ID(37)를 확인한 뒤 `passages` API로 장 본문을 받아 절 단위로 파싱합니다.
-**CEB는 저작권 번역이라 YouVersion Platform 대시보드에서 앱에 CEB 사용
-권한을 추가/승인받아야 하며**, 권한이 없으면 그 사실을 안내하고 WEB으로
-돌아갈 수 있습니다. 키를 빈 문자열로 두면 CEB 옵션이 숨겨집니다. CEB 표시 시
-번역본의 저작권 문구를 본문 하단에 함께 표시합니다.
+앱 키를 넣으면 번역본 선택에 **CEB · NIV · NASB · NLT** 옵션이 나타납니다.
+앱은 사용자의 브라우저에서 `api.youversion.com`을 직접 호출해(`X-YVP-App-Key`
+헤더) 각 번역본의 버전 ID(CEB 37 · NIV 111 · NASB 2692 · NLT 116)를 확인한 뒤
+`passages` API로 장 본문을 받아 절 단위로 파싱합니다. **저작권 번역본은
+YouVersion Platform의 Licensing에서 해당 출판사 계약(예: NIV는 Biblica,
+NASB는 Lockman, NLT는 Tyndale)을 수락해야 열리며**, 권한이 없으면 그 사실을
+안내하고 WEB으로 돌아갈 수 있습니다. 키를 빈 문자열로 두면 온라인 옵션이
+숨겨집니다. 온라인 번역본 표시 시 저작권 문구를 본문 하단에 함께 표시합니다.
 
 **주의:** 서버 없이 동작하는 정적 앱이므로 이 키는 사이트 방문자에게
 노출됩니다. 공개 배포 시에는 YouVersion Platform 대시보드에서 키 사용량을
@@ -54,7 +55,7 @@
 ## 기능
 
 - **영·한 대조 보기** — 절마다 영어 본문 아래에 한국어 번역 표시 (영어만 / 한국어만 모드 지원)
-- **영어 번역본 전환** — WEB(현대 영어) · KJV(1611) · CEB(온라인, YouVersion 앱 키 필요)
+- **영어 번역본 전환** — 오프라인: WEB(현대 영어) · KJV(1611) / 온라인(YouVersion 앱 키 필요): CEB · NIV 2011 · NASB 2020 · NLT
 - **한국어 소스 전환** — 개역한글 · AI 실시간 번역 · 둘 다 함께 보기
 - **책·장 탐색** — 구약/신약 책 목록, 장 번호 그리드, 이전/다음 장 버튼, ←/→ 방향키
 - **검색** — 한글을 입력하면 개역한글에서, 영어를 입력하면 선택한 영어 번역본에서 검색 (`/` 키로 열기, CEB 선택 시 영어 검색은 WEB 본문 기준)

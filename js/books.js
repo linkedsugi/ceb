@@ -84,5 +84,16 @@ const VERSIONS = {
   web: { label: "WEB", full: "World English Bible (현대 영어)" },
   kjv: { label: "KJV", full: "King James Version (1611)" },
   krv: { label: "개역한글", full: "개역한글판 (1961)" },
-  ceb: { label: "CEB", full: "Common English Bible (온라인, API.Bible)" },
+  ceb: { label: "CEB", full: "Common English Bible (온라인, YouVersion)" },
+  niv: { label: "NIV", full: "New International Version 2011 (온라인, YouVersion)" },
+  nasb: { label: "NASB", full: "New American Standard Bible 2020 (온라인, YouVersion)" },
+  nlt: { label: "NLT", full: "New Living Translation (온라인, YouVersion)" },
+};
+
+// YouVersion Platform에서 실시간으로 불러오는 번역본과 버전 ID
+const ONLINE_VERSIONS = {
+  ceb: { id: 37, pattern: /common english bible/i },
+  niv: { id: 111, pattern: /new international version/i },
+  nasb: { id: 2692, pattern: /new american standard/i },
+  nlt: { id: 116, pattern: /new living translation/i },
 };
