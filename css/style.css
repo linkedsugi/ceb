@@ -138,10 +138,27 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .verse-body { min-width: 0; }
 .verse-en { color: var(--text); }
 .verse-ko { color: var(--text); margin-top: 3px; }
+.verse-ai { color: var(--text); margin-top: 3px; }
+.verse-ai::before {
+  content: "AI"; display: inline-block; margin-right: 6px;
+  font-size: 0.62em; font-weight: 700; letter-spacing: 0.05em;
+  color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 0 4px; vertical-align: 0.15em;
+}
+.verse-ai.pending { color: var(--text-sub); font-style: italic; }
 .mode-both .verse-en { color: var(--text-sub); }
 .mode-both .verse-ko { font-weight: 500; }
-.mode-en .verse-ko, .mode-ko .verse-en { display: none; }
+.mode-en .verse-ko, .mode-en .verse-ai, .mode-ko .verse-en { display: none; }
 .mode-ko .verse-ko { margin-top: 0; }
+.ai-error {
+  margin: 8px 0 14px; padding: 10px 14px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--text);
+  border: 1px solid var(--border); font-size: 0.9em;
+}
+.copyright {
+  margin-top: 24px; color: var(--text-sub); font-size: 0.75rem;
+  text-align: center;
+}
 .loading { text-align: center; color: var(--text-sub); padding: 60px 0; }
 
 .pager { display: flex; justify-content: space-between; gap: 10px; margin-top: 28px; }
@@ -159,6 +176,24 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .app-footer a { color: var(--accent); }
 #fums { position: absolute; width: 1px; height: 1px; overflow: hidden; }
+
+/* ── AI 번역 설정 ───────────────────── */
+.settings-panel { width: min(420px, 92vw); }
+.settings-body { display: flex; flex-direction: column; gap: 12px; }
+.settings-note { color: var(--text-sub); font-size: 0.84rem; line-height: 1.55; }
+.settings-field {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 0.85rem; font-weight: 600; color: var(--text-sub);
+}
+.settings-field input {
+  font: inherit; font-weight: 400; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text);
+}
+.settings-field input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.pager-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pager-btn.primary:hover { opacity: 0.9; background: var(--accent); }
 
 /* ── 검색 ─────────────────────────── */
 .search-panel {

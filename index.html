@@ -24,6 +24,12 @@
       <option value="en">영어만</option>
       <option value="ko">한국어만</option>
     </select>
+    <select id="koSel" class="sel" title="한국어 번역 소스">
+      <option value="krv">개역한글</option>
+      <option value="ai">AI 번역</option>
+      <option value="both">개역+AI</option>
+    </select>
+    <button id="settingsBtn" class="icon-btn" title="AI 번역 설정" aria-label="AI 번역 설정">⚙️</button>
     <button id="searchBtn" class="icon-btn" title="검색" aria-label="검색">🔍</button>
     <button id="fontMinus" class="icon-btn" title="글자 작게" aria-label="글자 작게">A−</button>
     <button id="fontPlus" class="icon-btn" title="글자 크게" aria-label="글자 크게">A+</button>
@@ -49,6 +55,31 @@
   <div id="chapterGrid" class="chapter-grid"></div>
 </div>
 
+<div id="settingsPanel" class="chapter-picker settings-panel" hidden>
+  <div class="chapter-picker-head">
+    <span>AI 실시간 번역 설정</span>
+    <button id="settingsClose" class="icon-btn" aria-label="닫기">✕</button>
+  </div>
+  <div class="settings-body">
+    <p class="settings-note">영어 본문을 AI가 실시간으로 한국어로 번역합니다.
+      OpenAI 호환 API 키가 필요하며, 키는 이 브라우저(localStorage)에만 저장되고
+      서버나 저장소로 전송되지 않습니다.</p>
+    <label class="settings-field">API 키
+      <input id="aiKey" type="password" placeholder="sk-..." autocomplete="off">
+    </label>
+    <label class="settings-field">모델
+      <input id="aiModel" type="text" placeholder="gpt-5.6-sol">
+    </label>
+    <label class="settings-field">API 베이스 URL
+      <input id="aiBase" type="text" placeholder="https://api.openai.com/v1">
+    </label>
+    <div class="settings-actions">
+      <button id="aiClearCache" class="pager-btn">번역 캐시 비우기</button>
+      <button id="aiSave" class="pager-btn primary">저장</button>
+    </div>
+  </div>
+</div>
+
 <div id="searchPanel" class="search-panel" hidden>
   <div class="search-head">
     <input id="searchInput" type="search" placeholder="검색어 입력 (한국어 또는 영어)" autocomplete="off">
@@ -67,13 +98,13 @@
     <button id="nextBtn" class="pager-btn">다음 장 →</button>
   </div>
   <footer class="app-footer">
-    <p>영어 본문: World English Bible(퍼블릭 도메인) · King James Version · Common English Bible(온라인, <a href="https://scripture.api.bible" target="_blank" rel="noopener">API.Bible</a> 제공) — 한국어 본문: 개역한글판(1961)</p>
+    <p>영어 본문: World English Bible(퍼블릭 도메인) · King James Version · Common English Bible(온라인, <a href="https://platform.youversion.com" target="_blank" rel="noopener">YouVersion Platform</a> 제공) — 한국어 본문: 개역한글판(1961)</p>
+    <p>AI 번역은 선택한 영어 본문을 실시간으로 번역한 참고용 결과로, 정식 번역을 대체하지 않습니다.</p>
     <p>절 번호 매김은 번역본에 따라 일부 다를 수 있습니다. 절을 누르면 영·한 본문이 복사됩니다.</p>
   </footer>
 </main>
 
 <div id="toast" class="toast" hidden></div>
-<div id="fums" aria-hidden="true"></div>
 
 <script src="js/config.js"></script>
 <script src="js/books.js"></script>

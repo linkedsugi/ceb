@@ -37,110 +37,229 @@ const BibleData = (() => {
   return { register, load, store };
 })();
 
-/* ── API.Bible (Common English Bible 온라인) ─────
- * CEB는 저작권 번역이라 본문을 내장할 수 없고,
- * 사용자 브라우저에서 API.Bible을 직접 호출해 표시한다.
+/* ── YouVersion Platform (Common English Bible 온라인) ─────
+ * CEB는 저작권 번역이라 본문을 내장할 수 없고, 사용자 브라우저에서
+ * YouVersion Platform API(platform.youversion.com)를 직접 호출해 표시한다.
  */
 const CebApi = (() => {
-  const BASE = "https://api.scripture.api.bible/v1";
+  const BASE = "https://api.youversion.com";
   const chapterCache = {}; // "book:chapter" -> { verses, title }
-  let bibleIdPromise = null;
+  let versionPromise = null; // { id, copyright }
 
   function enabled() {
-    return typeof API_BIBLE_KEY !== "undefined" && API_BIBLE_KEY;
+    return typeof YOUVERSION_APP_KEY !== "undefined" && YOUVERSION_APP_KEY;
   }
 
   async function req(path) {
-    const res = await fetch(BASE + path, { headers: { "api-key": API_BIBLE_KEY } });
+    const res = await fetch(BASE + path, {
+      headers: { "X-YVP-App-Key": YOUVERSION_APP_KEY },
+    });
     if (res.status === 401 || res.status === 403) {
-      throw new Error("API 키가 거부되었습니다 (" + res.status + "). 키 또는 사용 권한을 확인해 주세요.");
+      throw new Error("YouVersion 앱 키가 거부되었습니다 (" + res.status +
+        "). platform.youversion.com에서 키와 사용 권한을 확인해 주세요.");
     }
-    if (!res.ok) throw new Error("API.Bible 오류 (" + res.status + ")");
-    const json = await res.json();
-    reportFums(json.meta);
-    return json;
+    if (res.status === 404) throw new Error("본문이 없습니다 (404)");
+    if (!res.ok) throw new Error("YouVersion API 오류 (" + res.status + ")");
+    return res.json();
   }
 
-  // API.Bible 이용 조건인 FUMS(사용량 집계) 픽셀 보고
-  function reportFums(meta) {
-    if (meta && meta.fumsNoScript) {
-      try { $("fums").innerHTML = meta.fumsNoScript; } catch (e) { /* 무시 */ }
-    }
-  }
-
-  // 키에 허용된 성경 목록에서 CEB의 ID를 찾는다 (localStorage에 캐시)
-  function getBibleId() {
-    if (bibleIdPromise) return bibleIdPromise;
-    bibleIdPromise = (async () => {
+  // 앱 키로 사용 가능한 영어 번역본 중에서 CEB를 찾는다 (localStorage에 캐시)
+  function getVersion() {
+    if (versionPromise) return versionPromise;
+    versionPromise = (async () => {
       try {
-        const cached = localStorage.getItem("bible-app-ceb-id");
-        if (cached) return cached;
+        const cached = JSON.parse(localStorage.getItem("bible-app-ceb-version"));
+        if (cached && cached.id) return cached;
       } catch (e) { /* 무시 */ }
-      const json = await req("/bibles?language=eng");
-      const list = json.data || [];
-      const ceb = list.find((b) => /common english bible/i.test(b.name || "")) ||
-                  list.find((b) => (b.abbreviation || "").toUpperCase() === "CEB");
-      if (!ceb) {
-        throw new Error("이 API 키로는 Common English Bible을 사용할 수 없습니다. " +
-          "API.Bible 대시보드에서 CEB 사용 신청이 승인되었는지 확인해 주세요.");
+      let pageToken = "";
+      for (let page = 0; page < 10; page++) {
+        const json = await req("/v1/bibles?language_ranges[]=en&page_size=100" +
+          (pageToken ? "&page_token=" + encodeURIComponent(pageToken) : ""));
+        const list = json.data || [];
+        const ceb = list.find((b) =>
+          (b.abbreviation || "").toUpperCase() === "CEB" ||
+          /common english bible/i.test(b.title || ""));
+        if (ceb) {
+          const v = { id: ceb.id, copyright: ceb.copyright || "" };
+          try { localStorage.setItem("bible-app-ceb-version", JSON.stringify(v)); } catch (e) { /* 무시 */ }
+          return v;
+        }
+        pageToken = json.next_page_token;
+        if (!pageToken) break;
       }
-      try { localStorage.setItem("bible-app-ceb-id", ceb.id); } catch (e) { /* 무시 */ }
-      return ceb.id;
+      throw new Error("이 앱 키로 사용할 수 있는 번역본 중에 Common English Bible이 없습니다. " +
+        "platform.youversion.com에서 앱의 번역본 사용 범위를 확인해 주세요.");
     })();
-    bibleIdPromise.catch(() => { bibleIdPromise = null; }); // 실패 시 다음에 재시도
-    return bibleIdPromise;
+    versionPromise.catch(() => { versionPromise = null; }); // 실패 시 다음에 재시도
+    return versionPromise;
   }
 
-  // "[1] 본문 [2] 본문…" 형태의 텍스트를 절 배열로 파싱
-  function parseContent(content) {
-    const parts = String(content).split(/\s*\[(\d+)\]\s*/);
+  /* passages API의 HTML을 절 배열로 파싱한다.
+   * 구조: <span class="yv-v" v="16"></span><span class="yv-vlbl">16</span>본문…
+   * 각주는 <span class="yv-n …">, 시편 표제는 <div class="d">, 도입부는 <div class="ip">.
+   */
+  function parseChapterHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll(".yv-n, .yv-vlbl, .note, .f").forEach((n) => n.remove());
     const verses = [];
-    const title = parts[0] ? parts[0].replace(/\s+/g, " ").trim() : "";
-    for (let i = 1; i + 1 <= parts.length - 1; i += 2) {
-      verses[Number(parts[i]) - 1] = parts[i + 1].replace(/\s+/g, " ").trim();
+    const titleParts = [];
+    let current = 0; // 0 = 아직 절 시작 전(표제/도입부)
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeType === 1) {
+        if (node.classList && node.classList.contains("yv-v")) {
+          const num = parseInt(node.getAttribute("v"), 10);
+          if (num >= 1) current = num;
+        }
+        continue;
+      }
+      const text = node.nodeValue;
+      if (!text || !text.trim()) continue;
+      if (current === 0) titleParts.push(text);
+      else verses[current - 1] = (verses[current - 1] || "") + text + " ";
     }
-    for (let i = 0; i < verses.length; i++) if (verses[i] == null) verses[i] = "";
-    return { verses, title };
+    const clean = (s) => s.replace(/\s+/g, " ").trim();
+    for (let i = 0; i < verses.length; i++) verses[i] = clean(verses[i] || "");
+    return { verses, title: clean(titleParts.join(" ")) };
   }
 
   async function chapter(book, ch) {
     const key = book + ":" + ch;
     if (chapterCache[key]) return chapterCache[key];
-    const id = await getBibleId();
-    const chapterId = USFM[book] + "." + ch;
-    const json = await req("/bibles/" + id + "/chapters/" + chapterId +
-      "?content-type=text&include-verse-numbers=true&include-titles=false" +
-      "&include-notes=false&include-chapter-numbers=false");
-    const parsed = parseContent(json.data && json.data.content);
-    if (!parsed.verses.length) throw new Error("본문을 해석하지 못했습니다: " + chapterId);
+    const v = await getVersion();
+    const usfm = USFM[book] + "." + ch;
+    const json = await req("/v1/bibles/" + v.id + "/passages/" + usfm +
+      "?format=html&include_headings=false&include_notes=false");
+    const parsed = parseChapterHtml(json.content || "");
+    if (!parsed.verses.length) throw new Error("본문을 해석하지 못했습니다: " + usfm);
+    parsed.copyright = v.copyright;
     chapterCache[key] = parsed;
     return parsed;
   }
 
-  async function search(q, limit) {
-    const id = await getBibleId();
-    const json = await req("/bibles/" + id + "/search?query=" +
-      encodeURIComponent(q) + "&limit=" + (limit || 100) + "&sort=canonical");
-    const verses = (json.data && json.data.verses) || [];
-    const byCode = {};
-    USFM.forEach((code, i) => { if (code) byCode[code] = i; });
-    return verses.map((v) => {
-      const p = String(v.id || "").split("."); // 예: JHN.3.16
-      const book = byCode[p[0]];
-      if (!book) return null;
-      return { book, chapter: Number(p[1]), verse: Number(p[2]), text: v.text || "" };
-    }).filter(Boolean);
+  return { enabled, chapter };
+})();
+
+/* ── AI 실시간 번역 (OpenAI 호환 API) ─────────
+ * 선택한 영어 본문을 장 단위로 한국어로 번역한다.
+ * API 키는 사용자가 설정 화면에 입력하며 localStorage에만 저장된다.
+ */
+const AiTranslator = (() => {
+  const LS_SETTINGS = "bible-app-ai-settings";
+  const CACHE_PREFIX = "bible-app-ai-tr:";
+  const memCache = {};
+
+  function getSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(LS_SETTINGS)) || {}; } catch (e) { /* 무시 */ }
+    return {
+      key: s.key || "",
+      model: s.model || "gpt-5.6-sol",
+      base: (s.base || "https://api.openai.com/v1").replace(/\/+$/, ""),
+    };
   }
 
-  return { enabled, chapter, search };
+  function saveSettings(s) {
+    try { localStorage.setItem(LS_SETTINGS, JSON.stringify(s)); } catch (e) { /* 무시 */ }
+  }
+
+  function configured() { return !!getSettings().key; }
+
+  function cacheKey(version, book, chapter, model) {
+    return CACHE_PREFIX + model + ":" + version + ":" + book + ":" + chapter;
+  }
+
+  function clearCache() {
+    memCache && Object.keys(memCache).forEach((k) => delete memCache[k]);
+    try {
+      const dead = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(CACHE_PREFIX) === 0) dead.push(k);
+      }
+      dead.forEach((k) => localStorage.removeItem(k));
+    } catch (e) { /* 무시 */ }
+  }
+
+  // 장 전체를 한 번의 요청으로 번역해 절 배열을 반환
+  async function translateChapter(version, book, chapter, meta, enVerses) {
+    const s = getSettings();
+    if (!s.key) throw new Error("AI 번역을 쓰려면 ⚙️ 설정에서 API 키를 입력해 주세요.");
+    const ck = cacheKey(version, book, chapter, s.model);
+    if (memCache[ck]) return memCache[ck];
+    try {
+      const stored = JSON.parse(localStorage.getItem(ck));
+      if (Array.isArray(stored) && stored.length === enVerses.length) {
+        memCache[ck] = stored;
+        return stored;
+      }
+    } catch (e) { /* 무시 */ }
+
+    const numbered = enVerses.map((v, i) => (i + 1) + ". " + (v || "")).join("\n");
+    const body = {
+      model: s.model,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a professional Bible translator. Translate English Bible verses into natural, " +
+            "faithful modern Korean (현대 한국어, 존댓말이 아닌 성경 문어체). Preserve meaning precisely; " +
+            "do not add, omit, or interpret beyond the text. Keep proper nouns in standard Korean " +
+            "Bible spelling (e.g., 예수, 여호와, 예루살렘). Return ONLY a JSON object of the form " +
+            '{"verses": ["...", ...]} with exactly one Korean string per input verse, in order. ' +
+            "If an input verse is empty, return an empty string for it.",
+        },
+        {
+          role: "user",
+          content: meta[2] + " chapter " + chapter + " (" + enVerses.length + " verses):\n" + numbered,
+        },
+      ],
+    };
+
+    const res = await fetch(s.base + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + s.key,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) throw new Error("AI API 키가 거부되었습니다(401). ⚙️ 설정에서 키를 확인해 주세요.");
+    if (res.status === 404) throw new Error("모델을 찾을 수 없습니다(404). ⚙️ 설정에서 모델 이름을 확인해 주세요.");
+    if (res.status === 429) throw new Error("AI API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.");
+    if (!res.ok) throw new Error("AI 번역 요청 실패 (" + res.status + ")");
+    const json = await res.json();
+    const content = json.choices && json.choices[0] && json.choices[0].message &&
+      json.choices[0].message.content;
+    if (!content) throw new Error("AI 응답이 비어 있습니다.");
+
+    let verses;
+    try {
+      const parsed = JSON.parse(content);
+      verses = Array.isArray(parsed) ? parsed : parsed.verses;
+    } catch (e) {
+      throw new Error("AI 응답을 해석하지 못했습니다.");
+    }
+    if (!Array.isArray(verses) || !verses.length) throw new Error("AI 응답 형식이 올바르지 않습니다.");
+    verses = enVerses.map((_, i) => String(verses[i] == null ? "" : verses[i]).trim());
+
+    memCache[ck] = verses;
+    try { localStorage.setItem(ck, JSON.stringify(verses)); } catch (e) { /* 용량 초과 등은 무시 */ }
+    return verses;
+  }
+
+  return { getSettings, saveSettings, configured, translateChapter, clearCache };
 })();
 
 /* ── 상태 ─────────────────────────────── */
 const state = {
   book: 43,       // 요한복음
   chapter: 3,
-  version: "web", // 영어 번역본
-  mode: "both",   // both | en | ko
+  version: "web",  // 영어 번역본
+  mode: "both",    // both | en | ko
+  koSource: "krv", // krv | ai | both
   fontScale: 1,
   theme: "auto",
 };
@@ -151,7 +270,8 @@ function saveState() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
       book: state.book, chapter: state.chapter, version: state.version,
-      mode: state.mode, fontScale: state.fontScale, theme: state.theme,
+      mode: state.mode, koSource: state.koSource,
+      fontScale: state.fontScale, theme: state.theme,
     }));
   } catch (e) { /* 사생활 보호 모드 등에서 실패해도 무시 */ }
 }
@@ -260,16 +380,59 @@ async function renderChapter(highlightVerse) {
     reader.appendChild(el("div", "psalm-title", en.title));
   }
 
+  const showKrv = state.koSource !== "ai";
+  const showAi = state.koSource !== "krv";
+  const aiResult = []; // 번역이 도착하면 채워짐 (복사에 사용)
+
   for (let v = 0; v < count; v++) {
     const row = el("div", "verse");
     row.dataset.verse = v + 1;
     row.appendChild(el("div", "verse-num", String(v + 1)));
     const body = el("div", "verse-body");
     if (enVerses[v]) body.appendChild(el("div", "verse-en", enVerses[v]));
-    if (koVerses[v]) body.appendChild(el("div", "verse-ko", koVerses[v]));
+    if (showKrv && koVerses[v]) body.appendChild(el("div", "verse-ko", koVerses[v]));
+    if (showAi && enVerses[v]) {
+      const ai = el("div", "verse-ai pending", "AI 번역 중…");
+      ai.dataset.aiVerse = v;
+      body.appendChild(ai);
+    }
     row.appendChild(body);
-    row.addEventListener("click", () => copyVerse(meta, v + 1, enVerses[v], koVerses[v]));
+    row.addEventListener("click", () =>
+      copyVerse(meta, v + 1, enVerses[v], showKrv ? koVerses[v] : "", aiResult[v]));
     reader.appendChild(row);
+  }
+
+  if (showAi && state.mode !== "en") {
+    if (!AiTranslator.configured()) {
+      reader.querySelectorAll(".verse-ai").forEach((n) => {
+        n.textContent = "⚙️ 설정에서 AI API 키를 입력하면 번역이 표시됩니다.";
+      });
+      openSettings("AI 번역을 사용하려면 API 키를 입력해 주세요.");
+    } else {
+      AiTranslator.translateChapter(state.version, state.book, state.chapter, meta, enVerses)
+        .then((translated) => {
+          if (token !== renderToken) return;
+          translated.forEach((t, i) => { aiResult[i] = t; });
+          reader.querySelectorAll(".verse-ai").forEach((n) => {
+            const i = Number(n.dataset.aiVerse);
+            n.classList.remove("pending");
+            n.textContent = translated[i] || "";
+          });
+        })
+        .catch((err) => {
+          if (token !== renderToken) return;
+          const msg = (err && err.message) || "AI 번역에 실패했습니다.";
+          reader.querySelectorAll(".verse-ai").forEach((n) => n.remove());
+          const first = reader.querySelector(".verse");
+          const notice = el("div", "ai-error", msg);
+          reader.insertBefore(notice, first);
+          toast("AI 번역 실패");
+        });
+    }
+  }
+
+  if (state.version === "ceb" && en.copyright) {
+    reader.appendChild(el("div", "copyright", en.copyright));
   }
 
   $("prevBtn").disabled = state.book === 1 && state.chapter === 1;
@@ -291,11 +454,12 @@ async function renderChapter(highlightVerse) {
   }
 }
 
-function copyVerse(meta, num, enText, koText) {
+function copyVerse(meta, num, enText, koText, aiText) {
   const ref = meta[1] + " " + state.chapter + ":" + num;
   const parts = [ref];
   if (state.mode !== "ko" && enText) parts.push(enText);
   if (state.mode !== "en" && koText) parts.push(koText);
+  if (state.mode !== "en" && aiText) parts.push("(AI 번역) " + aiText);
   const text = parts.join("\n");
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text)
@@ -378,7 +542,31 @@ function closePanels() {
   $("sidebar").hidden = true;
   $("chapterPicker").hidden = true;
   $("searchPanel").hidden = true;
+  $("settingsPanel").hidden = true;
   $("overlay").hidden = true;
+}
+
+/* ── AI 번역 설정 ──────────────────────── */
+function openSettings(hint) {
+  closePanels();
+  const s = AiTranslator.getSettings();
+  $("aiKey").value = s.key;
+  $("aiModel").value = s.model;
+  $("aiBase").value = s.base;
+  $("overlay").hidden = false;
+  $("settingsPanel").hidden = false;
+  if (hint) toast(hint);
+}
+
+function saveSettingsFromForm() {
+  AiTranslator.saveSettings({
+    key: $("aiKey").value.trim(),
+    model: $("aiModel").value.trim() || "gpt-5.6-sol",
+    base: $("aiBase").value.trim() || "https://api.openai.com/v1",
+  });
+  closePanels();
+  toast("저장되었습니다");
+  if (state.koSource !== "krv") renderChapter();
 }
 
 /* ── 검색 ─────────────────────────────── */
@@ -401,38 +589,14 @@ async function runSearch() {
   }
   const token = ++searchToken;
   const isKorean = /[가-힣]/.test(q);
-  const version = isKorean ? "krv" : state.version;
+  // CEB는 검색 API가 없으므로 영어 검색은 오프라인 WEB 본문을 기준으로 한다
+  const cebNote = !isKorean && state.version === "ceb";
+  const version = isKorean ? "krv" : (cebNote ? "web" : state.version);
   const needle = isKorean ? q : q.toLowerCase();
   const MAX = 200;
   let hits = 0;
 
   status.textContent = "검색 중…";
-
-  // CEB(온라인)는 API.Bible 검색 엔드포인트 사용
-  if (version === "ceb") {
-    try {
-      const results = await CebApi.search(q, MAX);
-      if (token !== searchToken) return;
-      results.forEach((r) => {
-        const meta = bookMeta(r.book);
-        const hit = el("button", "search-hit");
-        hit.appendChild(el("div", "ref", meta[1] + " " + r.chapter + ":" + r.verse));
-        hit.appendChild(el("div", "snippet", r.text.slice(0, 160)));
-        hit.addEventListener("click", () => {
-          closePanels();
-          goTo(r.book, r.chapter, r.verse);
-        });
-        box.appendChild(hit);
-      });
-      status.textContent = results.length === 0
-        ? "「" + q + "」 검색 결과가 없습니다. (CEB)"
-        : "「" + q + "」 " + results.length + "건 — CEB";
-    } catch (err) {
-      if (token !== searchToken) return;
-      status.textContent = "CEB 검색 실패: " + (err && err.message ? err.message : "네트워크 오류");
-    }
-    return;
-  }
   for (let b = 1; b <= 66 && hits < MAX; b++) {
     let data;
     try {
@@ -468,10 +632,11 @@ async function runSearch() {
     status.textContent = "검색 중… (" + meta[1] + ", " + hits + "건)";
   }
   if (token !== searchToken) return;
-  status.textContent = hits === 0
+  status.textContent = (hits === 0
     ? "「" + q + "」 검색 결과가 없습니다. (" + VERSIONS[version].label + ")"
     : "「" + q + "」 " + hits + "건" + (hits >= MAX ? " (최대 표시 수 도달)" : "") +
-      " — " + VERSIONS[version].label;
+      " — " + VERSIONS[version].label) +
+    (cebNote ? " · CEB는 검색을 지원하지 않아 WEB 본문 기준으로 찾았습니다" : "");
 }
 
 /* ── 초기화 ────────────────────────────── */
@@ -507,6 +672,19 @@ function init() {
 
   $("versionSel").value = state.version;
   $("modeSel").value = state.mode;
+  $("koSel").value = state.koSource;
+
+  $("koSel").addEventListener("change", (e) => {
+    state.koSource = e.target.value;
+    renderChapter();
+  });
+  $("settingsBtn").addEventListener("click", () => openSettings());
+  $("settingsClose").addEventListener("click", closePanels);
+  $("aiSave").addEventListener("click", saveSettingsFromForm);
+  $("aiClearCache").addEventListener("click", () => {
+    AiTranslator.clearCache();
+    toast("번역 캐시를 비웠습니다");
+  });
 
   $("menuBtn").addEventListener("click", openSidebar);
   $("refBtn").addEventListener("click", () => openChapterPicker(state.book));
