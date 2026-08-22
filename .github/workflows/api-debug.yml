@@ -1,0 +1,29 @@
+name: API Debug (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe YouVersion API
+        run: |
+          KEY="qbm8XmKaOzIz13aHVCrcgd9vfWAfRr6Ge6LoPV8w5i7NaLLf"
+          H1="X-YVP-App-Key: $KEY"
+          H2="X-YVP-Installation-Id: ceb-web-app"
+
+          probe () {
+            echo "=== $1"
+            curl -sS -o body.txt -w "status=%{http_code} content-type=%{content_type} size=%{size_download}\n" \
+              -H "$H1" -H "$H2" "$1" || true
+            head -c 700 body.txt; echo; echo "---"
+          }
+
+          probe "https://api.youversion.com/v1/bibles?language_ranges%5B%5D=en&page_size=99"
+          echo "CEB in list:"; grep -o "Common English Bible" body.txt | head -1 || echo "(not found on page 1)"
+          grep -o '"next_page_token":"[^"]*"' body.txt || echo "(no next_page_token match)"
+
+          probe "https://api.youversion.com/v1/bibles/37"
+          probe "https://api.youversion.com/v1/bibles/37/passages/JHN.3?format=html&include_headings=false&include_notes=false"
+          probe "https://api.youversion.com/v1/bibles/37/passages/JHN.3"
