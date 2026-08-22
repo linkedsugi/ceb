@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Bible Canvas">
 <meta name="theme-color" content="#faf8f4">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=__BUILD__">
 </head>
 <body>
 <header class="topbar">
@@ -206,10 +206,11 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/config.js"></script>
-<script src="js/vendor/supabase.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/books.js"></script>
-<script src="js/app.js"></script>
+<!-- ?v=__BUILD__ 는 배포 워크플로가 커밋 SHA로 치환한다 (HTML과 JS/CSS 버전 불일치 캐싱 방지) -->
+<script src="js/config.js?v=__BUILD__"></script>
+<script src="js/vendor/supabase.js?v=__BUILD__"></script>
+<script src="js/auth.js?v=__BUILD__"></script>
+<script src="js/books.js?v=__BUILD__"></script>
+<script src="js/app.js?v=__BUILD__"></script>
 </body>
 </html>

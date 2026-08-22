@@ -1340,6 +1340,9 @@ function init() {
     $("aiKeyField").hidden = e.target.value === "shared";
   });
 
+  // 로그인 모듈이 실패해도(스크립트 캐시 불일치·로드 실패 등)
+  // 본문 읽기 기능은 그대로 동작해야 한다.
+  try {
   Auth.init();
   Auth.onChange(updateAuthUi);
   if (Auth.enabled()) {
@@ -1363,6 +1366,9 @@ function init() {
         btn.disabled = false;
       }
     });
+  }
+  } catch (e) {
+    if (window.console && console.error) console.error("로그인 초기화 실패:", e);
   }
   $("aiClearCache").addEventListener("click", () => {
     AiTranslator.clearCache();
