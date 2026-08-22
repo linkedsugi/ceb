@@ -61,12 +61,16 @@
 </nav>
 <div id="overlay" class="overlay" hidden></div>
 
-<div id="chapterPicker" class="chapter-picker" hidden>
+<div id="refPicker" class="chapter-picker ref-picker" hidden>
   <div class="chapter-picker-head">
-    <span id="chapterPickerTitle"></span>
-    <button id="chapterPickerClose" class="icon-btn" aria-label="닫기">✕</button>
+    <span id="refPickerTitle">책 · 장 · 절 선택</span>
+    <button id="refPickerClose" class="icon-btn" aria-label="닫기">✕</button>
   </div>
-  <div id="chapterGrid" class="chapter-grid"></div>
+  <div class="ref-cols">
+    <div id="refBooks" class="ref-col"></div>
+    <div id="refChapters" class="ref-col"></div>
+    <div id="refVerses" class="ref-col"></div>
+  </div>
 </div>
 
 <div id="settingsPanel" class="chapter-picker settings-panel" hidden>

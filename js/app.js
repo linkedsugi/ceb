@@ -821,7 +821,7 @@ function buildBookList() {
     btn.appendChild(el("span", "en", b[2]));
     btn.addEventListener("click", () => {
       closePanels();
-      openChapterPicker(b[0]);
+      openRefPicker(b[0]);
     });
     (b[0] <= 39 ? ot : nt).appendChild(btn);
   });
@@ -833,22 +833,92 @@ function renderBookListActive() {
   });
 }
 
-function openChapterPicker(bookId) {
-  const meta = bookMeta(bookId);
-  $("chapterPickerTitle").textContent = meta[1] + " (" + meta[2] + ")";
-  const grid = $("chapterGrid");
-  grid.innerHTML = "";
-  for (let c = 1; c <= meta[3]; c++) {
-    const cell = el("button", "chapter-cell", String(c));
-    if (bookId === state.book && c === state.chapter) cell.classList.add("active");
-    cell.addEventListener("click", () => {
-      closePanels();
-      goTo(bookId, c);
-    });
-    grid.appendChild(cell);
+/* ── 통합 책·장·절 선택 ─────────────────── */
+let pickerBook = 1;
+let pickerChapter = 1;
+let refVersesToken = 0;
+
+function refItem(label, selected, onClick, extra) {
+  const item = el("button", "ref-item" + (selected ? " sel" : ""));
+  item.appendChild(el("span", "ref-item-main", label));
+  if (extra) item.appendChild(el("span", "ref-item-sub", extra));
+  item.addEventListener("click", onClick);
+  return item;
+}
+
+function updateRefPickerTitle() {
+  $("refPickerTitle").textContent = bookMeta(pickerBook)[1] + " " + pickerChapter + "장";
+}
+
+function renderRefBooks() {
+  const box = $("refBooks");
+  box.innerHTML = "";
+  BOOKS.forEach((b) => {
+    if (b[0] === 1) box.appendChild(el("div", "testament-label", "구약"));
+    if (b[0] === 40) box.appendChild(el("div", "testament-label", "신약"));
+    const item = refItem(b[1], b[0] === pickerBook, () => {
+      pickerBook = b[0];
+      pickerChapter = 1;
+      renderRefBooks();
+      renderRefChapters();
+      renderRefVerses();
+      updateRefPickerTitle();
+    }, b[2]);
+    if (b[0] === pickerBook) item.dataset.sel = "1";
+    box.appendChild(item);
+  });
+}
+
+function renderRefChapters() {
+  const box = $("refChapters");
+  box.innerHTML = "";
+  const count = bookMeta(pickerBook)[3];
+  for (let c = 1; c <= count; c++) {
+    const item = refItem(c + " 장", c === pickerChapter, ((cc) => () => {
+      pickerChapter = cc;
+      renderRefChapters();
+      renderRefVerses();
+      updateRefPickerTitle();
+    })(c));
+    if (c === pickerChapter) item.dataset.sel = "1";
+    box.appendChild(item);
   }
+}
+
+async function renderRefVerses() {
+  const box = $("refVerses");
+  const token = ++refVersesToken;
+  box.innerHTML = "";
+  box.appendChild(el("div", "settings-note", "…"));
+  let count = 0;
+  try {
+    const krv = await BibleData.load("krv", pickerBook);
+    count = (krv.chapters[pickerChapter - 1] || []).length;
+  } catch (e) { count = 0; }
+  if (token !== refVersesToken) return;
+  box.innerHTML = "";
+  for (let v = 1; v <= count; v++) {
+    box.appendChild(refItem(v + " 절", false, ((vv) => () => {
+      closePanels();
+      goTo(pickerBook, pickerChapter, vv);
+    })(v)));
+  }
+}
+
+function openRefPicker(bookId) {
+  closePanels();
+  pickerBook = bookId || state.book;
+  pickerChapter = pickerBook === state.book ? state.chapter : 1;
+  renderRefBooks();
+  renderRefChapters();
+  renderRefVerses();
+  updateRefPickerTitle();
   $("overlay").hidden = false;
-  $("chapterPicker").hidden = false;
+  $("refPicker").hidden = false;
+  const selBook = $("refBooks").querySelector('[data-sel="1"]');
+  if (selBook) selBook.scrollIntoView({ block: "center" });
+  const selCh = $("refChapters").querySelector('[data-sel="1"]');
+  if (selCh) selCh.scrollIntoView({ block: "center" });
 }
 
 function openSidebar() {
@@ -860,7 +930,7 @@ function openSidebar() {
 
 function closePanels() {
   $("sidebar").hidden = true;
-  $("chapterPicker").hidden = true;
+  $("refPicker").hidden = true;
   $("searchPanel").hidden = true;
   $("settingsPanel").hidden = true;
   $("adminPanel").hidden = true;
@@ -1356,9 +1426,26 @@ function init() {
   });
 
   $("menuBtn").addEventListener("click", openSidebar);
-  $("refBtn").addEventListener("click", () => openChapterPicker(state.book));
+  $("refBtn").addEventListener("click", () => openRefPicker());
   $("overlay").addEventListener("click", closePanels);
-  $("chapterPickerClose").addEventListener("click", closePanels);
+  $("refPickerClose").addEventListener("click", closePanels);
+
+  // 좌우 스와이프로 이전/다음 장 이동
+  let swipeX = null, swipeY = null;
+  $("main").addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { swipeX = null; return; }
+    swipeX = e.touches[0].clientX;
+    swipeY = e.touches[0].clientY;
+  }, { passive: true });
+  $("main").addEventListener("touchend", (e) => {
+    if (swipeX == null || !e.changedTouches.length) return;
+    const dx = e.changedTouches[0].clientX - swipeX;
+    const dy = e.changedTouches[0].clientY - swipeY;
+    swipeX = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+      step(dx < 0 ? 1 : -1);
+    }
+  }, { passive: true });
   $("searchClose").addEventListener("click", closePanels);
   $("prevBtn").addEventListener("click", () => step(-1));
   $("nextBtn").addEventListener("click", () => step(1));
