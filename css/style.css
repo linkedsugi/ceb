@@ -70,6 +70,10 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   overflow-y: auto;
 }
 .sidebar-inner { padding: 16px 12px 32px; }
+.brand {
+  font-weight: 800; font-size: 1.05rem; padding: 4px 8px 10px;
+  border-bottom: 1px solid var(--border); margin-bottom: 8px;
+}
 .testament-label {
   font-size: 0.8rem; font-weight: 700; color: var(--accent);
   letter-spacing: 0.05em; margin: 14px 8px 6px;
@@ -150,6 +154,16 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .mode-both .verse-ko { font-weight: 500; }
 .mode-en .verse-ko, .mode-en .verse-ai, .mode-ko .verse-en { display: none; }
 .mode-ko .verse-ko { margin-top: 0; }
+.ai-model-note {
+  margin: 2px 0 12px; text-align: center;
+  color: var(--text-sub); font-size: 0.78rem;
+}
+.ai-model-note::before {
+  content: "AI"; display: inline-block; margin-right: 6px;
+  font-size: 0.72em; font-weight: 700; letter-spacing: 0.05em;
+  color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 0 4px; vertical-align: 0.12em;
+}
 .ai-error {
   margin: 8px 0 14px; padding: 10px 14px; border-radius: 10px;
   background: var(--accent-soft); color: var(--text);

@@ -1,4 +1,4 @@
-# 영한 성경 (English–Korean Parallel Bible)
+# Bible Canvas
 
 영어 성경 본문을 한국어 번역과 절 단위로 나란히 읽을 수 있는 정적 웹앱입니다.
 서버나 빌드 과정 없이 브라우저만으로 동작합니다.

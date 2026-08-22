@@ -464,7 +464,17 @@ const AiTranslator = (() => {
     return verses;
   }
 
-  return { getSettings, saveSettings, configured, translateChapter, clearCache, listModels };
+  // 현재 선택된 공급자·모델 표시용 정보
+  function info() {
+    const picked = current();
+    return {
+      provider: picked.provider,
+      providerLabel: picked.provider === "gemini" ? "Google Gemini" : "OpenAI",
+      model: picked.conf.model,
+    };
+  }
+
+  return { getSettings, saveSettings, configured, translateChapter, clearCache, listModels, info };
 })();
 
 /* ── 상태 ─────────────────────────────── */
@@ -549,7 +559,7 @@ async function renderChapter(highlightVerse) {
   const reader = $("reader");
   const token = ++renderToken;
   $("refText").textContent = meta[1] + " " + state.chapter + "장";
-  document.title = meta[1] + " " + state.chapter + "장 — 영한 성경";
+  document.title = meta[1] + " " + state.chapter + "장 — Bible Canvas";
   reader.className = "reader mode-" + state.mode;
   reader.innerHTML = '<div class="loading">불러오는 중…</div>';
 
@@ -608,6 +618,10 @@ async function renderChapter(highlightVerse) {
     if (showAi && enVerses[v]) {
       const ai = el("div", "verse-ai pending", "AI 번역 중…");
       ai.dataset.aiVerse = v;
+      if (AiTranslator.configured()) {
+        const inf = AiTranslator.info();
+        ai.title = inf.providerLabel + " · " + inf.model;
+      }
       body.appendChild(ai);
     }
     row.appendChild(body);
@@ -623,6 +637,11 @@ async function renderChapter(highlightVerse) {
       });
       openSettings("AI 번역을 사용하려면 API 키를 입력해 주세요.");
     } else {
+      const inf = AiTranslator.info();
+      const modelNote = el("div", "ai-model-note",
+        "AI 번역: " + inf.model + " (" + inf.providerLabel + ") — 참고용");
+      const firstVerse = reader.querySelector(".verse");
+      if (firstVerse) reader.insertBefore(modelNote, firstVerse);
       AiTranslator.translateChapter(state.version, state.book, state.chapter, meta, enVerses)
         .then((translated) => {
           if (token !== renderToken) return;
@@ -636,6 +655,7 @@ async function renderChapter(highlightVerse) {
         .catch((err) => {
           if (token !== renderToken) return;
           const msg = (err && err.message) || "AI 번역에 실패했습니다.";
+          modelNote.remove();
           reader.querySelectorAll(".verse-ai").forEach((n) => n.remove());
           const first = reader.querySelector(".verse");
           const notice = el("div", "ai-error", msg);
@@ -673,7 +693,10 @@ function copyVerse(meta, num, enText, koText, aiText) {
   const parts = [ref];
   if (state.mode !== "ko" && enText) parts.push(enText);
   if (state.mode !== "en" && koText) parts.push(koText);
-  if (state.mode !== "en" && aiText) parts.push("(AI 번역) " + aiText);
+  if (state.mode !== "en" && aiText) {
+    const inf = AiTranslator.info();
+    parts.push("(AI 번역 · " + inf.model + ") " + aiText);
+  }
   const text = parts.join("\n");
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text)
