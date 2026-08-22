@@ -1408,6 +1408,10 @@ function init() {
     const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
     mutateVerseAnn({ u: !(ann && ann.u) });
   });
+  $("vmNote").addEventListener("focus", () => {
+    // 모바일 키보드가 올라와도 입력란·저장 버튼이 보이도록
+    setTimeout(() => $("vmNote").scrollIntoView({ block: "center", behavior: "smooth" }), 250);
+  });
   $("vmNoteSave").addEventListener("click", () => {
     const text = $("vmNote").value.trim();
     const ann = mutateVerseAnn({ n: text || null });
@@ -1476,7 +1480,7 @@ function init() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") {
+    if (["INPUT", "SELECT", "TEXTAREA"].indexOf(e.target.tagName) !== -1) {
       if (e.key === "Escape") closePanels();
       return;
     }

@@ -393,6 +393,10 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   .topbar-selects .sel { flex: 1; min-width: 0; font-size: 0.84rem; padding: 5px 4px; }
   .user-chip { max-width: 76px; padding: 3px 7px; font-size: 0.76rem; }
   .login-btn { font-size: 0.82rem; }
+  /* iOS는 입력 글자가 16px 미만이면 포커스 시 화면을 강제 확대함 */
+  #vmNote, .settings-field input, .settings-field select,
+  .search-head input, .sel { font-size: 16px; }
+  .chapter-picker { top: 10px; max-height: 84vh; }
   .verse { grid-template-columns: 2em 1fr; padding: 8px 4px; }
   .main { padding: 14px 10px 60px; }
 }
