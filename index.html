@@ -69,6 +69,51 @@
     <button id="settingsClose" class="icon-btn" aria-label="닫기">✕</button>
   </div>
   <div class="settings-body">
+    <details class="app-about">
+      <summary><span class="about-icon">📘</span> 앱 사용 설명서<span class="about-sub">주요 기능과 사용법 보기</span></summary>
+      <div class="about-body">
+        <p><b>Bible Canvas</b>는 영어 성경 본문을 한국어 번역과 절 단위로
+          나란히 읽는 성경 읽기 웹앱입니다.</p>
+        <ul>
+          <li><b>📖 영·한 대조 읽기</b> — WEB·KJV(내장)와 NIV·NIrV·NASB·AMP·BSB(온라인),
+            그리스어 신약 원문(TR1894)을 개역한글판과 절 단위로 대조합니다.
+            보기 모드로 영어만/한국어만/대조를 전환할 수 있습니다.</li>
+          <li><b>🤖 AI 실시간 번역</b> — OpenAI·Google Gemini 모델이 영어(또는 그리스어)
+            본문을 한국어로 실시간 번역합니다. 모델을 직접 고르고 ↻로 최신 목록을
+            불러올 수 있으며, 번역 결과는 캐시되어 재방문 시 빠르게 열립니다.</li>
+          <li><b>🧭 빠른 탐색</b> — 상단의 책·장 버튼을 누르면 책/장/절을 한 화면에서
+            선택합니다. 본문을 좌우로 밀면 이전/다음 장으로 이동하고,
+            🔍 검색은 한국어·영어 모두 지원합니다.</li>
+          <li><b>🔖 개인 기록</b> — 절을 누르면 책갈피(저장 시각 기록), 형광펜 4색,
+            빨간 밑줄, 나만의 노트를 남길 수 있습니다. 기록은 이 기기의 브라우저에
+            저장됩니다.</li>
+          <li><b>👥 계정과 공유 키</b> — 구글 로그인 후, 관리자가 승인한 회원은
+            관리자가 등록한 공유 API 키로 AI 번역을 쓸 수 있습니다.
+            본인 키를 직접 입력해 쓸 수도 있습니다.</li>
+          <li><b>📱 앱처럼 설치</b> — 홈 화면에 추가하면 전용 아이콘과 함께
+            앱처럼 실행됩니다. 다크 모드와 글자 크기도 이 설정에서 조절합니다.
+            <div class="install-steps">
+              <p><b>아이폰 (Safari)</b></p>
+              <ol>
+                <li>Safari로 이 사이트를 엽니다.</li>
+                <li>하단 가운데의 <b>공유 버튼(<span class="share-icon">⬆</span> 네모에 화살표)</b>을 누릅니다.</li>
+                <li>메뉴를 내려 <b>"홈 화면에 추가"</b>를 선택합니다.</li>
+                <li>오른쪽 위 <b>추가</b>를 누르면 바탕화면에 Bible Canvas 아이콘이 생깁니다.</li>
+              </ol>
+              <p><b>안드로이드 (Chrome)</b></p>
+              <ol>
+                <li>Chrome으로 이 사이트를 엽니다.</li>
+                <li>오른쪽 위 <b>⋮ 메뉴</b>를 누릅니다.</li>
+                <li><b>"홈 화면에 추가"</b>(또는 "앱 설치")를 선택하고 <b>추가</b>를 누릅니다.</li>
+              </ol>
+            </div></li>
+          <li><b>⚖️ 저작권 안내</b> — 온라인 본문은 YouVersion Platform이 제공하며,
+            CEB·ESV·NLT는 출판사 라이선스 승인 전까지 선택할 수 없습니다.
+            AI 번역은 참고용으로 정식 번역을 대체하지 않습니다.</li>
+        </ul>
+        <p class="settings-note">빌드 __BUILD__</p>
+      </div>
+    </details>
     <label class="settings-field">화면 테마
       <select id="themeSel">
         <option value="auto">시스템 설정 따름</option>
@@ -117,51 +162,6 @@
       <button id="aiClearCache" class="pager-btn">번역 캐시 비우기</button>
       <button id="aiSave" class="pager-btn primary">저장</button>
     </div>
-    <details class="app-about">
-      <summary>ℹ️ Bible Canvas 소개 · 주요 기능</summary>
-      <div class="about-body">
-        <p><b>Bible Canvas</b>는 영어 성경 본문을 한국어 번역과 절 단위로
-          나란히 읽는 성경 읽기 웹앱입니다.</p>
-        <ul>
-          <li><b>📖 영·한 대조 읽기</b> — WEB·KJV(내장)와 NIV·NIrV·NASB·AMP·BSB(온라인),
-            그리스어 신약 원문(TR1894)을 개역한글판과 절 단위로 대조합니다.
-            보기 모드로 영어만/한국어만/대조를 전환할 수 있습니다.</li>
-          <li><b>🤖 AI 실시간 번역</b> — OpenAI·Google Gemini 모델이 영어(또는 그리스어)
-            본문을 한국어로 실시간 번역합니다. 모델을 직접 고르고 ↻로 최신 목록을
-            불러올 수 있으며, 번역 결과는 캐시되어 재방문 시 빠르게 열립니다.</li>
-          <li><b>🧭 빠른 탐색</b> — 상단의 책·장 버튼을 누르면 책/장/절을 한 화면에서
-            선택합니다. 본문을 좌우로 밀면 이전/다음 장으로 이동하고,
-            🔍 검색은 한국어·영어 모두 지원합니다.</li>
-          <li><b>🔖 개인 기록</b> — 절을 누르면 책갈피(저장 시각 기록), 형광펜 4색,
-            빨간 밑줄, 나만의 노트를 남길 수 있습니다. 기록은 이 기기의 브라우저에
-            저장됩니다.</li>
-          <li><b>👥 계정과 공유 키</b> — 구글 로그인 후, 관리자가 승인한 회원은
-            관리자가 등록한 공유 API 키로 AI 번역을 쓸 수 있습니다.
-            본인 키를 직접 입력해 쓸 수도 있습니다.</li>
-          <li><b>📱 앱처럼 설치</b> — 홈 화면에 추가하면 전용 아이콘과 함께
-            앱처럼 실행됩니다. 다크 모드와 글자 크기도 이 설정에서 조절합니다.
-            <div class="install-steps">
-              <p><b>아이폰 (Safari)</b></p>
-              <ol>
-                <li>Safari로 이 사이트를 엽니다.</li>
-                <li>하단 가운데의 <b>공유 버튼(<span class="share-icon">⬆</span> 네모에 화살표)</b>을 누릅니다.</li>
-                <li>메뉴를 내려 <b>"홈 화면에 추가"</b>를 선택합니다.</li>
-                <li>오른쪽 위 <b>추가</b>를 누르면 바탕화면에 Bible Canvas 아이콘이 생깁니다.</li>
-              </ol>
-              <p><b>안드로이드 (Chrome)</b></p>
-              <ol>
-                <li>Chrome으로 이 사이트를 엽니다.</li>
-                <li>오른쪽 위 <b>⋮ 메뉴</b>를 누릅니다.</li>
-                <li><b>"홈 화면에 추가"</b>(또는 "앱 설치")를 선택하고 <b>추가</b>를 누릅니다.</li>
-              </ol>
-            </div></li>
-          <li><b>⚖️ 저작권 안내</b> — 온라인 본문은 YouVersion Platform이 제공하며,
-            CEB·ESV·NLT는 출판사 라이선스 승인 전까지 선택할 수 없습니다.
-            AI 번역은 참고용으로 정식 번역을 대체하지 않습니다.</li>
-        </ul>
-        <p class="settings-note">빌드 __BUILD__</p>
-      </div>
-    </details>
   </div>
 </div>
 

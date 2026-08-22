@@ -320,12 +320,23 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); width: 100%;
 }
-.app-about { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
 .app-about summary {
-  cursor: pointer; font-size: 0.88rem; font-weight: 700; color: var(--accent);
-  list-style-position: inside;
+  cursor: pointer; font-size: 0.95rem; font-weight: 800; color: var(--accent);
+  list-style: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  background: var(--accent-soft);
+  border: 1.5px solid var(--accent); border-radius: 12px;
 }
-.app-about summary:hover { text-decoration: underline; }
+.app-about summary::-webkit-details-marker { display: none; }
+.app-about summary::after { content: "▾"; margin-left: auto; font-size: 0.85em; }
+.app-about[open] summary::after { content: "▴"; }
+.app-about summary:hover { filter: brightness(0.96); }
+.app-about summary .about-icon { font-size: 1.15em; }
+.app-about summary .about-sub {
+  font-weight: 400; font-size: 0.78rem; color: var(--text-sub);
+}
+.app-about[open] { border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 .about-body { margin-top: 8px; font-size: 0.84rem; line-height: 1.6; color: var(--text); }
 .about-body p { margin-bottom: 8px; }
 .about-body ul { padding-left: 4px; list-style: none; }
