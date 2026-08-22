@@ -175,6 +175,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 #vmNote {
   width: 100%; margin-top: 6px; padding: 8px 10px; resize: vertical;
   font: inherit; font-size: 0.9rem;
+  /* 본문용 line-height(1.7)를 물려받으면 iOS에서 커서가 글자보다 길게 그려진다 */
+  line-height: 1.4;
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text);
 }
@@ -308,7 +310,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   font-size: 0.85rem; font-weight: 600; color: var(--text-sub);
 }
 .settings-field input {
-  font: inherit; font-weight: 400; padding: 8px 10px;
+  font: inherit; font-weight: 400; line-height: 1.4; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text);
 }
