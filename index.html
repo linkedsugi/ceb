@@ -62,15 +62,25 @@
   </div>
   <div class="settings-body">
     <p class="settings-note">영어 본문을 AI가 실시간으로 한국어로 번역합니다.
-      OpenAI 호환 API 키가 필요하며, 키는 이 브라우저(localStorage)에만 저장되고
-      서버나 저장소로 전송되지 않습니다.</p>
+      API 키는 이 브라우저(localStorage)에만 저장되고 서버나 저장소로 전송되지
+      않습니다. ↻ 버튼으로 공급자의 최신 모델 목록을 불러올 수 있습니다.</p>
+    <label class="settings-field">AI 공급자
+      <select id="aiProvider">
+        <option value="openai">OpenAI</option>
+        <option value="gemini">Google Gemini</option>
+      </select>
+    </label>
     <label class="settings-field">API 키
       <input id="aiKey" type="password" placeholder="sk-..." autocomplete="off">
     </label>
-    <label class="settings-field">모델
-      <input id="aiModel" type="text" placeholder="gpt-5.6-sol">
-    </label>
-    <label class="settings-field">API 베이스 URL
+    <div class="settings-field">모델
+      <div class="model-row">
+        <select id="aiModelSel"></select>
+        <button id="aiModelRefresh" class="pager-btn" title="최신 모델 목록 새로고침">↻</button>
+      </div>
+      <input id="aiModelCustom" type="text" placeholder="모델 이름 직접 입력" hidden>
+    </div>
+    <label class="settings-field" id="aiBaseField">API 베이스 URL (OpenAI 호환 게이트웨이용)
       <input id="aiBase" type="text" placeholder="https://api.openai.com/v1">
     </label>
     <div class="settings-actions">

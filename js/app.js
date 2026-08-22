@@ -71,16 +71,24 @@ const CebApi = (() => {
       throw new Error("YouVersion 앱 키가 거부되었습니다 (" + res.status +
         "). platform.youversion.com에서 키와 사용 권한을 확인해 주세요.");
     }
+    const text = await res.text();
     if (!res.ok) {
       let detail = "";
       try {
-        const body = await res.json();
+        const body = JSON.parse(text);
         detail = body.message || body.error || "";
       } catch (e) { /* 무시 */ }
-      throw new Error("YouVersion API 오류 (" + res.status + (detail ? ": " + detail : "") +
+      const err = new Error("YouVersion API 오류 (" + res.status + (detail ? ": " + detail : "") +
         ") — " + path);
+      err.status = res.status;
+      throw err;
     }
-    return res.json();
+    if (res.status === 204 || !text) return null; // 빈 응답 = 결과 없음
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error("YouVersion 응답을 해석하지 못했습니다 — " + path);
+    }
   }
 
   function pickCeb(list) {
@@ -105,34 +113,35 @@ const CebApi = (() => {
         return v;
       };
 
-      let listError = null;
-      try {
-        let pageToken = "";
-        for (let page = 0; page < 10; page++) {
-          const params = { "language_ranges[]": ["en"], page_size: 99 }; // API 최대치 99
-          if (pageToken) params.page_token = pageToken;
-          const json = await req("/v1/bibles", params);
-          const ceb = pickCeb(json.data);
-          if (ceb) return save(ceb);
-          pageToken = json.next_page_token;
-          if (!pageToken) break;
-        }
-      } catch (e) {
-        listError = e;
-      }
-
-      // 목록 조회가 실패하거나 목록에 없으면 CEB의 공개 버전 ID(37)로 직접 확인
+      // CEB의 버전 ID(37, bible.com/versions/37-ceb)를 먼저 직접 확인
+      let cebDenied = false;
       try {
         const b = await req("/v1/bibles/37");
-        if (/common english bible/i.test(b.title || "") ||
-            (b.abbreviation || "").toUpperCase() === "CEB") {
+        if (b && (/common english bible/i.test(b.title || "") ||
+            (b.abbreviation || "").toUpperCase() === "CEB")) {
           return save(b);
         }
-      } catch (e) { /* 아래에서 종합 안내 */ }
+      } catch (e) {
+        if (e && e.status === 404) cebDenied = true; // 키에 CEB 권한 없음
+        else throw e;
+      }
 
-      if (listError) throw listError;
-      throw new Error("이 앱 키로 사용할 수 있는 번역본 중에 Common English Bible이 없습니다. " +
-        "platform.youversion.com에서 앱의 번역본 사용 범위를 확인해 주세요.");
+      // 혹시 다른 ID로 등록돼 있을 수 있으니 목록도 확인 (빈 목록이면 204/null)
+      let pageToken = "";
+      for (let page = 0; page < 10; page++) {
+        const params = { "language_ranges[]": ["en"], page_size: 99 }; // API 최대치 99
+        if (pageToken) params.page_token = pageToken;
+        const json = await req("/v1/bibles", params);
+        if (!json) break; // 204: 이 키로 열람 가능한 목록이 비어 있음
+        const ceb = pickCeb(json.data);
+        if (ceb) return save(ceb);
+        pageToken = json.next_page_token;
+        if (!pageToken) break;
+      }
+
+      throw new Error("이 앱 키에 Common English Bible 사용 권한이 없습니다" +
+        (cebDenied ? " (버전 37 접근 거부됨)" : "") +
+        ". platform.youversion.com 대시보드에서 앱에 CEB 번역본을 추가/승인 신청해 주세요.");
     })();
     versionPromise.catch(() => { versionPromise = null; }); // 실패 시 다음에 재시도
     return versionPromise;
@@ -194,23 +203,95 @@ const CebApi = (() => {
 const AiTranslator = (() => {
   const LS_SETTINGS = "bible-app-ai-settings";
   const CACHE_PREFIX = "bible-app-ai-tr:";
+  const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
   const memCache = {};
+
+  // 2026-08 기준 시드 목록 — ↻ 새로고침 시 공급자 API의 실제 목록으로 대체된다
+  const DEFAULTS = {
+    provider: "openai",
+    openai: {
+      key: "",
+      model: "gpt-5.6-sol",
+      base: "https://api.openai.com/v1",
+      models: ["gpt-5.6-sol"],
+    },
+    gemini: {
+      key: "",
+      model: "gemini-3.6-flash",
+      models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
+    },
+  };
 
   function getSettings() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem(LS_SETTINGS)) || {}; } catch (e) { /* 무시 */ }
-    return {
-      key: s.key || "",
-      model: s.model || "gpt-5.6-sol",
-      base: (s.base || "https://api.openai.com/v1").replace(/\/+$/, ""),
+    if (s.key !== undefined && !s.openai) {
+      // 구버전 설정({key, model, base}) 마이그레이션
+      s = { provider: "openai", openai: { key: s.key, model: s.model, base: s.base } };
+    }
+    const merged = {
+      provider: s.provider === "gemini" ? "gemini" : "openai",
+      openai: Object.assign({}, DEFAULTS.openai, s.openai),
+      gemini: Object.assign({}, DEFAULTS.gemini, s.gemini),
     };
+    merged.openai.base = (merged.openai.base || DEFAULTS.openai.base).replace(/\/+$/, "");
+    if (!merged.openai.models || !merged.openai.models.length) merged.openai.models = DEFAULTS.openai.models.slice();
+    if (!merged.gemini.models || !merged.gemini.models.length) merged.gemini.models = DEFAULTS.gemini.models.slice();
+    return merged;
   }
 
   function saveSettings(s) {
     try { localStorage.setItem(LS_SETTINGS, JSON.stringify(s)); } catch (e) { /* 무시 */ }
   }
 
-  function configured() { return !!getSettings().key; }
+  function current(s) {
+    s = s || getSettings();
+    return { provider: s.provider, conf: s[s.provider] };
+  }
+
+  function configured() { return !!current().conf.key; }
+
+  // 공급자 API에서 사용 가능한 최신 모델 목록을 불러온다
+  async function listModels(provider, conf) {
+    if (!conf.key) throw new Error("먼저 API 키를 입력해 주세요.");
+    if (provider === "gemini") {
+      const res = await fetch(GEMINI_BASE + "/models?pageSize=200", {
+        headers: { "x-goog-api-key": conf.key },
+      });
+      if (!res.ok) {
+        let msg = "";
+        try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+        throw new Error("모델 목록 조회 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+      }
+      const json = await res.json();
+      const names = (json.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).indexOf("generateContent") !== -1)
+        .map((m) => String(m.name || "").replace(/^models\//, ""))
+        .filter((n) => n && !/embedding|aqa|imagen|veo|tts|audio|image/i.test(n));
+      names.sort().reverse(); // 최신 버전 번호가 앞으로
+      if (!names.length) throw new Error("사용 가능한 Gemini 모델이 없습니다.");
+      return names;
+    }
+    // OpenAI 호환
+    const res = await fetch((conf.base || DEFAULTS.openai.base).replace(/\/+$/, "") + "/models", {
+      headers: { "Authorization": "Bearer " + conf.key },
+    });
+    if (!res.ok) {
+      let msg = "";
+      try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+      throw new Error("모델 목록 조회 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+    }
+    const json = await res.json();
+    const rows = (json.data || []).filter((m) => {
+      const id = String(m.id || "");
+      if (!/^(gpt|o\d|chatgpt)/i.test(id)) return false;
+      return !/embed|whisper|tts|audio|dall-e|image|moderation|realtime|transcribe|search|instruct/i.test(id);
+    });
+    rows.sort((a, b) => (b.created || 0) - (a.created || 0)); // 최신 등록 순
+    const ids = rows.map((m) => m.id);
+    if (!ids.length) throw new Error("사용 가능한 채팅 모델이 없습니다.");
+    return ids;
+  }
 
   function cacheKey(version, book, chapter, model) {
     return CACHE_PREFIX + model + ":" + version + ":" + book + ":" + chapter;
@@ -228,11 +309,57 @@ const AiTranslator = (() => {
     } catch (e) { /* 무시 */ }
   }
 
+  // Gemini generateContent 호출 (JSON 응답을 우선 요청, 거부되면 없이 재시도)
+  async function callGemini(conf, messages) {
+    async function call(jsonMime) {
+      const body = {
+        system_instruction: { parts: [{ text: messages[0].content }] },
+        contents: [{ role: "user", parts: [{ text: messages[1].content }] }],
+      };
+      if (jsonMime) body.generationConfig = { responseMimeType: "application/json" };
+      const res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(conf.model) +
+        ":generateContent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": conf.key },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let apiMsg = "";
+        try { const j = await res.json(); apiMsg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+        let text;
+        if (res.status === 400 && /api key/i.test(apiMsg)) text = "Gemini API 키가 거부되었습니다. ⚙️ 설정에서 키를 확인해 주세요.";
+        else if (res.status === 401 || res.status === 403) text = "Gemini API 접근이 거부되었습니다(" + res.status + "). 키를 확인해 주세요.";
+        else if (res.status === 404) text = "모델 「" + conf.model + "」을 찾을 수 없습니다(404). ↻로 모델 목록을 새로고침해 주세요.";
+        else if (res.status === 429) text = "Gemini API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.";
+        else text = "Gemini 번역 요청 실패 (" + res.status + ")";
+        if (apiMsg) text += " — " + apiMsg;
+        const err = new Error(text);
+        err.status = res.status;
+        err.apiMessage = apiMsg;
+        throw err;
+      }
+      const json = await res.json();
+      const cand = json.candidates && json.candidates[0];
+      const parts = cand && cand.content && cand.content.parts;
+      return (parts || []).map((p) => p.text || "").join("");
+    }
+    try {
+      return await call(true);
+    } catch (err) {
+      if (err.status === 400 && /response_mime|responseMimeType|mime/i.test(err.apiMessage || "")) {
+        return call(false);
+      }
+      throw err;
+    }
+  }
+
   // 장 전체를 한 번의 요청으로 번역해 절 배열을 반환
   async function translateChapter(version, book, chapter, meta, enVerses) {
-    const s = getSettings();
-    if (!s.key) throw new Error("AI 번역을 쓰려면 ⚙️ 설정에서 API 키를 입력해 주세요.");
-    const ck = cacheKey(version, book, chapter, s.model);
+    const picked = current();
+    const provider = picked.provider;
+    const conf = picked.conf;
+    if (!conf.key) throw new Error("AI 번역을 쓰려면 ⚙️ 설정에서 API 키를 입력해 주세요.");
+    const ck = cacheKey(version, book, chapter, provider + ":" + conf.model);
     if (memCache[ck]) return memCache[ck];
     try {
       const stored = JSON.parse(localStorage.getItem(ck));
@@ -263,13 +390,13 @@ const AiTranslator = (() => {
     // 모델(특히 GPT-5 계열)에 따라 temperature나 response_format을 거부하므로
     // 최소 파라미터로 요청하고, response_format이 거부되면 없이 재시도한다.
     async function call(useJsonFormat) {
-      const body = { model: s.model, messages };
+      const body = { model: conf.model, messages };
       if (useJsonFormat) body.response_format = { type: "json_object" };
-      const res = await fetch(s.base + "/chat/completions", {
+      const res = await fetch(conf.base + "/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer " + s.key,
+          "Authorization": "Bearer " + conf.key,
         },
         body: JSON.stringify(body),
       });
@@ -281,7 +408,7 @@ const AiTranslator = (() => {
         } catch (e) { /* 무시 */ }
         let text;
         if (res.status === 401) text = "AI API 키가 거부되었습니다(401). ⚙️ 설정에서 키를 확인해 주세요.";
-        else if (res.status === 404) text = "모델 「" + s.model + "」을 찾을 수 없습니다(404). ⚙️ 설정에서 모델 이름을 확인해 주세요.";
+        else if (res.status === 404) text = "모델 「" + conf.model + "」을 찾을 수 없습니다(404). ↻로 모델 목록을 새로고침해 주세요.";
         else if (res.status === 429) text = "AI API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.";
         else text = "AI 번역 요청 실패 (" + res.status + ")";
         if (apiMsg) text += " — " + apiMsg;
@@ -293,19 +420,24 @@ const AiTranslator = (() => {
       return res.json();
     }
 
-    let json;
-    try {
-      json = await call(true);
-    } catch (err) {
-      // response_format을 지원하지 않는 모델/게이트웨이면 없이 다시 시도
-      if (err.status === 400 && /response_format|json_object/i.test(err.apiMessage || "")) {
-        json = await call(false);
-      } else {
-        throw err;
+    let content;
+    if (provider === "gemini") {
+      content = await callGemini(conf, messages);
+    } else {
+      let json;
+      try {
+        json = await call(true);
+      } catch (err) {
+        // response_format을 지원하지 않는 모델/게이트웨이면 없이 다시 시도
+        if (err.status === 400 && /response_format|json_object/i.test(err.apiMessage || "")) {
+          json = await call(false);
+        } else {
+          throw err;
+        }
       }
+      content = json.choices && json.choices[0] && json.choices[0].message &&
+        json.choices[0].message.content;
     }
-    const content = json.choices && json.choices[0] && json.choices[0].message &&
-      json.choices[0].message.content;
     if (!content) throw new Error("AI 응답이 비어 있습니다.");
 
     // 코드 펜스나 앞뒤 설명이 붙어도 JSON 부분만 추출해 해석
@@ -335,7 +467,7 @@ const AiTranslator = (() => {
     return verses;
   }
 
-  return { getSettings, saveSettings, configured, translateChapter, clearCache };
+  return { getSettings, saveSettings, configured, translateChapter, clearCache, listModels };
 })();
 
 /* ── 상태 ─────────────────────────────── */
@@ -632,26 +764,86 @@ function closePanels() {
 }
 
 /* ── AI 번역 설정 ──────────────────────── */
+let settingsDraft = null; // 설정 패널이 열려 있는 동안의 편집본
+
+function populateModelSelect(models, selected) {
+  const sel = $("aiModelSel");
+  sel.innerHTML = "";
+  const list = models.slice();
+  if (selected && list.indexOf(selected) === -1) list.unshift(selected);
+  list.forEach((m) => {
+    const o = document.createElement("option");
+    o.value = m;
+    o.textContent = m;
+    sel.appendChild(o);
+  });
+  const custom = document.createElement("option");
+  custom.value = "__custom__";
+  custom.textContent = "직접 입력…";
+  sel.appendChild(custom);
+  sel.value = selected && list.indexOf(selected) !== -1 ? selected : list[0];
+  $("aiModelCustom").hidden = sel.value !== "__custom__";
+}
+
+function fillSettingsForm() {
+  const p = settingsDraft.provider;
+  const conf = settingsDraft[p];
+  $("aiProvider").value = p;
+  $("aiKey").value = conf.key;
+  $("aiBaseField").hidden = p !== "openai";
+  $("aiBase").value = settingsDraft.openai.base;
+  populateModelSelect(conf.models, conf.model);
+}
+
+// 폼의 현재 입력값을 편집본의 해당 공급자 설정에 반영
+function collectSettingsForm() {
+  const p = settingsDraft.provider;
+  const conf = settingsDraft[p];
+  conf.key = $("aiKey").value.trim();
+  if (p === "openai") {
+    settingsDraft.openai.base =
+      ($("aiBase").value.trim() || "https://api.openai.com/v1").replace(/\/+$/, "");
+  }
+  const sel = $("aiModelSel").value;
+  const model = sel === "__custom__" ? $("aiModelCustom").value.trim() : sel;
+  if (model) conf.model = model;
+}
+
 function openSettings(hint) {
   closePanels();
-  const s = AiTranslator.getSettings();
-  $("aiKey").value = s.key;
-  $("aiModel").value = s.model;
-  $("aiBase").value = s.base;
+  settingsDraft = AiTranslator.getSettings();
+  fillSettingsForm();
   $("overlay").hidden = false;
   $("settingsPanel").hidden = false;
   if (hint) toast(hint);
 }
 
 function saveSettingsFromForm() {
-  AiTranslator.saveSettings({
-    key: $("aiKey").value.trim(),
-    model: $("aiModel").value.trim() || "gpt-5.6-sol",
-    base: $("aiBase").value.trim() || "https://api.openai.com/v1",
-  });
+  collectSettingsForm();
+  AiTranslator.saveSettings(settingsDraft);
   closePanels();
   toast("저장되었습니다");
   if (state.koSource !== "krv") renderChapter();
+}
+
+async function refreshModelList() {
+  collectSettingsForm();
+  const p = settingsDraft.provider;
+  const btn = $("aiModelRefresh");
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const models = await AiTranslator.listModels(p, settingsDraft[p]);
+    settingsDraft[p].models = models;
+    if (models.indexOf(settingsDraft[p].model) === -1) settingsDraft[p].model = models[0];
+    populateModelSelect(models, settingsDraft[p].model);
+    toast("모델 " + models.length + "개를 불러왔습니다");
+  } catch (err) {
+    toast(err && err.message ? err.message : "모델 목록을 불러오지 못했습니다");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻";
+  }
 }
 
 /* ── 검색 ─────────────────────────────── */
@@ -766,6 +958,15 @@ function init() {
   $("settingsBtn").addEventListener("click", () => openSettings());
   $("settingsClose").addEventListener("click", closePanels);
   $("aiSave").addEventListener("click", saveSettingsFromForm);
+  $("aiProvider").addEventListener("change", (e) => {
+    collectSettingsForm();
+    settingsDraft.provider = e.target.value;
+    fillSettingsForm();
+  });
+  $("aiModelSel").addEventListener("change", (e) => {
+    $("aiModelCustom").hidden = e.target.value !== "__custom__";
+  });
+  $("aiModelRefresh").addEventListener("click", refreshModelList);
   $("aiClearCache").addEventListener("click", () => {
     AiTranslator.clearCache();
     toast("번역 캐시를 비웠습니다");

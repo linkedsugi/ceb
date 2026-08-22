@@ -191,6 +191,14 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   background: var(--bg); color: var(--text);
 }
 .settings-field input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.settings-field select {
+  font: inherit; font-weight: 400; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); width: 100%;
+}
+.model-row { display: flex; gap: 6px; margin-top: 4px; }
+.model-row select { flex: 1; min-width: 0; }
+.model-row .pager-btn { padding: 8px 12px; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .pager-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .pager-btn.primary:hover { opacity: 0.9; background: var(--accent); }
