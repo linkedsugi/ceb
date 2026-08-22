@@ -21,7 +21,7 @@
   <button id="refBtn" class="ref-btn" title="책/장 선택">
     <span id="refText">요한복음 3장</span> <span class="caret">▾</span>
   </button>
-  <div class="topbar-right">
+  <div class="topbar-selects">
     <select id="versionSel" class="sel" title="영어 번역본">
       <option value="web">WEB</option>
       <option value="kjv">KJV</option>
@@ -36,17 +36,17 @@
       <option value="ai">AI 번역</option>
       <option value="both">개역+AI</option>
     </select>
+  </div>
+  <div class="topbar-right">
     <button id="bookmarksBtn" class="icon-btn" title="저장된 구절" aria-label="저장된 구절">🔖</button>
     <button id="settingsBtn" class="icon-btn" title="설정" aria-label="설정">⚙️</button>
     <button id="searchBtn" class="icon-btn" title="검색" aria-label="검색">🔍</button>
-    <button id="loginBtn" class="icon-btn login-btn" hidden>구글 로그인</button>
+    <button id="loginBtn" class="icon-btn login-btn" hidden>로그인</button>
     <span id="userBox" class="user-box" hidden>
       <button id="adminBtn" class="icon-btn" title="회원 관리" aria-label="회원 관리" hidden>👥</button>
       <span id="userChip" class="user-chip" title=""></span>
       <button id="logoutBtn" class="icon-btn" title="로그아웃" aria-label="로그아웃">⎋</button>
     </span>
-    <button id="fontMinus" class="icon-btn" title="글자 작게" aria-label="글자 작게">A−</button>
-    <button id="fontPlus" class="icon-btn" title="글자 크게" aria-label="글자 크게">A+</button>
   </div>
 </header>
 
@@ -82,6 +82,13 @@
         <option value="dark">다크</option>
       </select>
     </label>
+    <div class="settings-field">글자 크기
+      <div class="font-row">
+        <button id="fontMinus" class="pager-btn" title="글자 작게">A−</button>
+        <span id="fontScaleLabel" class="font-scale-label">100%</span>
+        <button id="fontPlus" class="pager-btn" title="글자 크게">A+</button>
+      </div>
+    </div>
     <div class="testament-label">AI 실시간 번역</div>
     <p class="settings-note" id="aiCurrentNote"></p>
     <p class="settings-note">영어 본문을 AI가 실시간으로 한국어로 번역합니다.

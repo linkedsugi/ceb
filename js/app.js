@@ -609,6 +609,8 @@ function applyTheme() {
 
 function applyFont() {
   document.documentElement.style.setProperty("--font-scale", state.fontScale);
+  const label = $("fontScaleLabel");
+  if (label) label.textContent = Math.round(state.fontScale * 100) + "%";
 }
 
 /* ── 본문 렌더링 ────────────────────────── */
