@@ -46,6 +46,14 @@ NASB는 Lockman, NLT는 Tyndale)을 수락해야 열리며**, 권한이 없으�
 재요청하지 않습니다(설정에서 캐시 비우기 가능). AI 번역은 참고용이며 정식
 번역을 대체하지 않습니다.
 
+## 로그인 · 회원관리 · 공유 API 키 (선택)
+
+Supabase를 연결하면 구글 로그인, 관리자(linkedsugi@gmail.com)의 회원
+승인/차단, 관리자가 등록한 공유 AI API 키를 승인 회원이 쓰는 기능이
+활성화됩니다. 설정 방법은 [SETUP-SUPABASE.md](SETUP-SUPABASE.md) 참고.
+`js/config.js`의 `SUPABASE_URL`이 비어 있으면 이 기능 전체가 숨겨지고
+앱은 로그인 없이 동작합니다.
+
 ## 실행 방법
 
 - `index.html` 파일을 브라우저로 열면 바로 동작합니다 (더블클릭으로 실행 가능).

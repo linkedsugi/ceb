@@ -191,6 +191,32 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .app-footer a { color: var(--accent); }
 #fums { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 
+/* ── 로그인 / 회원 관리 ─────────────────── */
+.login-btn { border: 1px solid var(--border); border-radius: 8px; }
+.user-box { display: inline-flex; align-items: center; gap: 2px; }
+.user-chip {
+  font-size: 0.82rem; color: var(--text-sub);
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.admin-panel { width: min(520px, 94vw); }
+.admin-members { display: flex; flex-direction: column; gap: 6px; }
+.member-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+}
+.member-info { flex: 1; min-width: 0; }
+.member-email { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; }
+.member-meta { color: var(--text-sub); font-size: 0.75rem; }
+.member-badge {
+  font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap;
+}
+.member-badge.ok { background: var(--accent-soft); color: var(--accent); }
+.member-badge.wait { border: 1px solid var(--border); color: var(--text-sub); }
+.member-toggle { padding: 6px 12px; font-size: 0.82rem; }
+.admin-keys { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+
 /* ── AI 번역 설정 ───────────────────── */
 .settings-panel { width: min(420px, 92vw); }
 .settings-body { display: flex; flex-direction: column; gap: 12px; }

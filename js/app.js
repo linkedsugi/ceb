@@ -208,12 +208,14 @@ const AiTranslator = (() => {
     provider: "openai",
     openai: {
       key: "",
+      useShared: false, // 관리자 공유 키 사용 여부 (승인 회원 전용)
       model: "gpt-5.6-sol",
       base: "https://api.openai.com/v1",
       models: ["gpt-5.6-sol"],
     },
     gemini: {
       key: "",
+      useShared: false,
       model: "gemini-3.6-flash",
       models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
     },
@@ -246,14 +248,25 @@ const AiTranslator = (() => {
     return { provider: s.provider, conf: s[s.provider] };
   }
 
-  function configured() { return !!current().conf.key; }
+  function configured() {
+    const conf = current().conf;
+    return !!conf.key || (conf.useShared && Auth.enabled());
+  }
+
+  // 실제 요청에 쓸 키를 결정: 직접 입력한 키 또는 관리자 공유 키
+  async function resolveKey(provider, conf) {
+    if (conf.useShared && Auth.enabled()) return Auth.getSharedKey(provider);
+    if (!conf.key) throw new Error("AI 번역을 쓰려면 ⚙️ 설정에서 API 키를 입력해 주세요.");
+    return conf.key;
+  }
 
   // 공급자 API에서 사용 가능한 최신 모델 목록을 불러온다
-  async function listModels(provider, conf) {
-    if (!conf.key) throw new Error("먼저 API 키를 입력해 주세요.");
+  async function listModels(provider, conf, apiKey) {
+    const key = apiKey || conf.key;
+    if (!key) throw new Error("먼저 API 키를 입력해 주세요.");
     if (provider === "gemini") {
       const res = await fetch(GEMINI_BASE + "/models?pageSize=200", {
-        headers: { "x-goog-api-key": conf.key },
+        headers: { "x-goog-api-key": key },
       });
       if (!res.ok) {
         let msg = "";
@@ -271,7 +284,7 @@ const AiTranslator = (() => {
     }
     // OpenAI 호환
     const res = await fetch((conf.base || DEFAULTS.openai.base).replace(/\/+$/, "") + "/models", {
-      headers: { "Authorization": "Bearer " + conf.key },
+      headers: { "Authorization": "Bearer " + key },
     });
     if (!res.ok) {
       let msg = "";
@@ -307,7 +320,7 @@ const AiTranslator = (() => {
   }
 
   // Gemini generateContent 호출 (JSON 응답을 우선 요청, 거부되면 없이 재시도)
-  async function callGemini(conf, messages) {
+  async function callGemini(conf, apiKey, messages) {
     async function call(jsonMime) {
       const body = {
         system_instruction: { parts: [{ text: messages[0].content }] },
@@ -317,7 +330,7 @@ const AiTranslator = (() => {
       const res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(conf.model) +
         ":generateContent", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": conf.key },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -355,7 +368,7 @@ const AiTranslator = (() => {
     const picked = current();
     const provider = picked.provider;
     const conf = picked.conf;
-    if (!conf.key) throw new Error("AI 번역을 쓰려면 ⚙️ 설정에서 API 키를 입력해 주세요.");
+    const apiKey = await resolveKey(provider, conf);
     const ck = cacheKey(version, book, chapter, provider + ":" + conf.model);
     if (memCache[ck]) return memCache[ck];
     try {
@@ -393,7 +406,7 @@ const AiTranslator = (() => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer " + conf.key,
+          "Authorization": "Bearer " + apiKey,
         },
         body: JSON.stringify(body),
       });
@@ -419,7 +432,7 @@ const AiTranslator = (() => {
 
     let content;
     if (provider === "gemini") {
-      content = await callGemini(conf, messages);
+      content = await callGemini(conf, apiKey, messages);
     } else {
       let json;
       try {
@@ -780,7 +793,75 @@ function closePanels() {
   $("chapterPicker").hidden = true;
   $("searchPanel").hidden = true;
   $("settingsPanel").hidden = true;
+  $("adminPanel").hidden = true;
   $("overlay").hidden = true;
+}
+
+/* ── 로그인 / 회원 관리 ─────────────────── */
+function updateAuthUi() {
+  if (!Auth.enabled()) return;
+  const u = Auth.user();
+  $("loginBtn").hidden = !!u;
+  $("userBox").hidden = !u;
+  if (u) {
+    const name = (u.email || "").split("@")[0];
+    const status = Auth.isAdmin() ? "관리자" : (Auth.isApproved() ? "승인됨" : "승인 대기 중");
+    $("userChip").textContent = name + (Auth.isAdmin() ? " ★" : (Auth.isApproved() ? " ✓" : " ⏳"));
+    $("userChip").title = u.email + " · " + status;
+    $("adminBtn").hidden = !Auth.isAdmin();
+  }
+}
+
+async function openAdminPanel() {
+  closePanels();
+  $("overlay").hidden = false;
+  $("adminPanel").hidden = false;
+  const box = $("adminMembers");
+  box.textContent = "불러오는 중…";
+  try {
+    const [profiles, keys] = await Promise.all([Auth.listProfiles(), Auth.getSharedKeys()]);
+    $("sharedOpenai").value = keys.openai || "";
+    $("sharedGemini").value = keys.gemini || "";
+    renderMembers(profiles);
+  } catch (err) {
+    box.textContent = (err && err.message) || "불러오지 못했습니다.";
+  }
+}
+
+function renderMembers(profiles) {
+  const box = $("adminMembers");
+  box.innerHTML = "";
+  if (!profiles.length) {
+    box.textContent = "아직 가입한 회원이 없습니다.";
+    return;
+  }
+  profiles.forEach((p) => {
+    const row = el("div", "member-row");
+    const info = el("div", "member-info");
+    info.appendChild(el("div", "member-email",
+      p.email + (p.email === ADMIN_EMAIL ? " (관리자)" : "")));
+    info.appendChild(el("div", "member-meta",
+      (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10)));
+    row.appendChild(info);
+    row.appendChild(el("span", "member-badge " + (p.approved ? "ok" : "wait"),
+      p.approved ? "승인됨" : "대기"));
+    if (p.email !== ADMIN_EMAIL) {
+      const btn = el("button", "pager-btn member-toggle", p.approved ? "차단" : "승인");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await Auth.setApproved(p.id, !p.approved);
+          toast(p.email + (p.approved ? " 차단됨" : " 승인됨"));
+          openAdminPanel();
+        } catch (err) {
+          toast(err.message);
+          btn.disabled = false;
+        }
+      });
+      row.appendChild(btn);
+    }
+    box.appendChild(row);
+  });
 }
 
 /* ── AI 번역 설정 ──────────────────────── */
@@ -809,6 +890,9 @@ function fillSettingsForm() {
   const p = settingsDraft.provider;
   const conf = settingsDraft[p];
   $("aiProvider").value = p;
+  $("aiKeySourceField").hidden = !Auth.enabled();
+  $("aiKeySource").value = conf.useShared && Auth.enabled() ? "shared" : "own";
+  $("aiKeyField").hidden = $("aiKeySource").value === "shared";
   $("aiKey").value = conf.key;
   $("aiBaseField").hidden = p !== "openai";
   $("aiBase").value = settingsDraft.openai.base;
@@ -819,6 +903,7 @@ function fillSettingsForm() {
 function collectSettingsForm() {
   const p = settingsDraft.provider;
   const conf = settingsDraft[p];
+  conf.useShared = Auth.enabled() && $("aiKeySource").value === "shared";
   conf.key = $("aiKey").value.trim();
   if (p === "openai") {
     settingsDraft.openai.base =
@@ -853,7 +938,9 @@ async function refreshModelList() {
   btn.disabled = true;
   btn.textContent = "…";
   try {
-    const models = await AiTranslator.listModels(p, settingsDraft[p]);
+    let sharedKey = null;
+    if (settingsDraft[p].useShared) sharedKey = await Auth.getSharedKey(p);
+    const models = await AiTranslator.listModels(p, settingsDraft[p], sharedKey);
     settingsDraft[p].models = models;
     if (models.indexOf(settingsDraft[p].model) === -1) settingsDraft[p].model = models[0];
     populateModelSelect(models, settingsDraft[p].model);
@@ -994,6 +1081,34 @@ function init() {
     $("aiModelCustom").hidden = e.target.value !== "__custom__";
   });
   $("aiModelRefresh").addEventListener("click", refreshModelList);
+  $("aiKeySource").addEventListener("change", (e) => {
+    $("aiKeyField").hidden = e.target.value === "shared";
+  });
+
+  Auth.init();
+  Auth.onChange(updateAuthUi);
+  if (Auth.enabled()) {
+    $("loginBtn").hidden = false;
+    $("loginBtn").addEventListener("click", () =>
+      Auth.signIn().catch((e) => toast(e.message || "로그인 실패")));
+    $("logoutBtn").addEventListener("click", () =>
+      Auth.signOut().then(() => toast("로그아웃되었습니다")));
+    $("adminBtn").addEventListener("click", openAdminPanel);
+    $("adminClose").addEventListener("click", closePanels);
+    $("sharedKeysSave").addEventListener("click", async () => {
+      const btn = $("sharedKeysSave");
+      btn.disabled = true;
+      try {
+        await Auth.upsertSharedKey("openai", $("sharedOpenai").value.trim());
+        await Auth.upsertSharedKey("gemini", $("sharedGemini").value.trim());
+        toast("공유 키가 저장되었습니다");
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
   $("aiClearCache").addEventListener("click", () => {
     AiTranslator.clearCache();
     toast("번역 캐시를 비웠습니다");
