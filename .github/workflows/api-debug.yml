@@ -20,8 +20,7 @@ jobs:
             STATUS=$(curl -sS -o page.json -w "%{http_code}" -H "$H1" -H "$H2" "$URL")
             echo "page $i status=$STATUS count=$(jq '.data | length' page.json 2>/dev/null || echo '?')"
             if [ "$STATUS" != "200" ]; then head -c 300 page.json; echo; break; fi
-            jq -c '.data[] | select((.title|test("Common English";"i")) or (.abbreviation=="CEB") or (.localized_abbreviation=="CEB")) | {id,abbreviation,title,organization_id}' page.json
-            jq -c '.data[] | select(.abbreviation|test("CEB";"i")) | {id,abbreviation,title,organization_id}' page.json
+            jq -c '.data[] | {id,abbreviation,title}' page.json
             TOKEN=$(jq -r '.next_page_token // empty' page.json)
             [ -z "$TOKEN" ] && echo "(no more pages)" && break
           done
