@@ -490,6 +490,64 @@ const AiTranslator = (() => {
   return { getSettings, saveSettings, configured, translateChapter, clearCache, listModels, info };
 })();
 
+/* ── 구절 주석 (책갈피·형광펜·밑줄, localStorage) ── */
+const Annotations = (() => {
+  const LS = "bible-app-annotations";
+  let data = null;
+
+  function load() {
+    if (data) return data;
+    try { data = JSON.parse(localStorage.getItem(LS)) || {}; } catch (e) { data = {}; }
+    return data;
+  }
+  function persist() {
+    try { localStorage.setItem(LS, JSON.stringify(data)); } catch (e) { /* 무시 */ }
+  }
+  function key(b, c, v) { return b + ":" + c + ":" + v; }
+
+  function get(b, c, v) { return load()[key(b, c, v)] || null; }
+
+  // patch: { b?: 책갈피, h?: 형광펜 색, u?: 밑줄 }. 모두 비면 항목 삭제.
+  function set(b, c, v, patch, snippet) {
+    load();
+    const k = key(b, c, v);
+    const next = Object.assign({}, data[k] || {}, patch);
+    if (!next.b && !next.h && !next.u) {
+      delete data[k];
+      persist();
+      return null;
+    }
+    if (snippet) next.t = snippet;
+    if (!next.ts) next.ts = Date.now();
+    data[k] = next;
+    persist();
+    return next;
+  }
+
+  function clear(b, c, v) { return set(b, c, v, { b: null, h: null, u: null }); }
+
+  function list() {
+    load();
+    return Object.keys(data).map((k) => {
+      const p = k.split(":").map(Number);
+      return Object.assign({ book: p[0], chapter: p[1], verse: p[2] }, data[k]);
+    }).sort((a, b) => a.book - b.book || a.chapter - b.chapter || a.verse - b.verse);
+  }
+
+  return { get, set, clear, list };
+})();
+
+const HL_COLORS = ["yellow", "green", "blue", "pink"];
+
+function applyAnnotationClasses(row, ann) {
+  row.classList.remove("bookmarked", "underlined");
+  HL_COLORS.forEach((c) => row.classList.remove("hl-" + c));
+  if (!ann) return;
+  if (ann.b) row.classList.add("bookmarked");
+  if (ann.u) row.classList.add("underlined");
+  if (ann.h) row.classList.add("hl-" + ann.h);
+}
+
 /* ── 상태 ─────────────────────────────── */
 const state = {
   book: 43,       // 요한복음
@@ -637,8 +695,9 @@ async function renderChapter(highlightVerse) {
       body.appendChild(ai);
     }
     row.appendChild(body);
+    applyAnnotationClasses(row, Annotations.get(state.book, state.chapter, v + 1));
     row.addEventListener("click", () =>
-      copyVerse(meta, v + 1, enVerses[v], showKrv ? koVerses[v] : "", aiResult[v]));
+      openVerseMenu(meta, v + 1, enVerses[v], showKrv ? koVerses[v] : "", aiResult, row));
     reader.appendChild(row);
   }
 
@@ -787,7 +846,87 @@ function closePanels() {
   $("searchPanel").hidden = true;
   $("settingsPanel").hidden = true;
   $("adminPanel").hidden = true;
+  $("versePanel").hidden = true;
+  $("bookmarksPanel").hidden = true;
   $("overlay").hidden = true;
+}
+
+/* ── 구절 액션 메뉴 (복사·책갈피·형광펜·밑줄) ── */
+let verseCtx = null; // { book, chapter, verse, en, ko, aiArr, row }
+
+function verseSnippet(ctx) {
+  return String(ctx.ko || ctx.en || "").slice(0, 60);
+}
+
+function updateVerseMenu() {
+  const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
+  $("vmBookmark").textContent = ann && ann.b ? "🔖 책갈피 해제" : "🔖 책갈피 추가";
+  $("vmUnderline").textContent = ann && ann.u ? "빨간 밑줄 제거" : "빨간 밑줄";
+  document.querySelectorAll(".hl-swatch").forEach((s) => {
+    s.classList.toggle("sel", (ann && ann.h ? ann.h : "") === s.dataset.hl && s.dataset.hl !== "");
+  });
+}
+
+function openVerseMenu(meta, verse, enText, koText, aiArr, row) {
+  closePanels();
+  verseCtx = { book: state.book, chapter: state.chapter, verse,
+    en: enText || "", ko: koText || "", aiArr, row };
+  $("versePanelTitle").textContent = meta[1] + " " + state.chapter + ":" + verse;
+  updateVerseMenu();
+  $("overlay").hidden = false;
+  $("versePanel").hidden = false;
+}
+
+function mutateVerseAnn(patch) {
+  const c = verseCtx;
+  const ann = Annotations.set(c.book, c.chapter, c.verse, patch, verseSnippet(c));
+  applyAnnotationClasses(c.row, ann);
+  updateVerseMenu();
+  return ann;
+}
+
+/* ── 저장된 구절 목록 ───────────────────── */
+function openBookmarksPanel() {
+  closePanels();
+  const box = $("bookmarksList");
+  box.innerHTML = "";
+  const items = Annotations.list();
+  if (!items.length) {
+    box.appendChild(el("div", "settings-note",
+      "저장된 구절이 없습니다. 절을 누르면 책갈피·형광펜을 추가할 수 있습니다."));
+  }
+  items.forEach((it) => {
+    const meta = bookMeta(it.book);
+    const row = el("div", "bm-row");
+    const badges = el("div", "bm-badges");
+    if (it.b) badges.appendChild(el("span", null, "🔖"));
+    if (it.h) {
+      const dot = el("span", "bm-dot hl-" + it.h);
+      dot.title = "형광펜";
+      badges.appendChild(dot);
+    }
+    if (it.u) badges.appendChild(el("span", "bm-underline", "밑줄"));
+    const info = el("div", "bm-info");
+    info.appendChild(el("div", "bm-ref", meta[1] + " " + it.chapter + ":" + it.verse));
+    info.appendChild(el("div", "bm-snippet", it.t || ""));
+    row.appendChild(badges);
+    row.appendChild(info);
+    const del = el("button", "icon-btn bm-del", "✕");
+    del.title = "저장 삭제";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      Annotations.clear(it.book, it.chapter, it.verse);
+      openBookmarksPanel();
+    });
+    row.appendChild(del);
+    row.addEventListener("click", () => {
+      closePanels();
+      goTo(it.book, it.chapter, it.verse);
+    });
+    box.appendChild(row);
+  });
+  $("overlay").hidden = false;
+  $("bookmarksPanel").hidden = false;
 }
 
 /* ── 로그인 / 회원 관리 ─────────────────── */
@@ -1131,6 +1270,29 @@ function init() {
   $("aiClearCache").addEventListener("click", () => {
     AiTranslator.clearCache();
     toast("번역 캐시를 비웠습니다");
+  });
+
+  $("bookmarksBtn").addEventListener("click", openBookmarksPanel);
+  $("bookmarksClose").addEventListener("click", closePanels);
+  $("versePanelClose").addEventListener("click", closePanels);
+  $("vmBookmark").addEventListener("click", () => {
+    const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
+    const next = mutateVerseAnn({ b: !(ann && ann.b) });
+    toast(next && next.b ? "책갈피에 추가했습니다" : "책갈피를 해제했습니다");
+  });
+  $("vmUnderline").addEventListener("click", () => {
+    const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
+    mutateVerseAnn({ u: !(ann && ann.u) });
+  });
+  $("vmCopy").addEventListener("click", () => {
+    copyVerse(bookMeta(verseCtx.book), verseCtx.verse, verseCtx.en, verseCtx.ko,
+      verseCtx.aiArr ? verseCtx.aiArr[verseCtx.verse - 1] : "");
+    closePanels();
+  });
+  document.querySelectorAll(".hl-swatch").forEach((s) => {
+    s.addEventListener("click", () => {
+      mutateVerseAnn({ h: s.dataset.hl || null });
+    });
   });
 
   $("menuBtn").addEventListener("click", openSidebar);
