@@ -320,6 +320,16 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); width: 100%;
 }
+.app-about { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+.app-about summary {
+  cursor: pointer; font-size: 0.88rem; font-weight: 700; color: var(--accent);
+  list-style-position: inside;
+}
+.app-about summary:hover { text-decoration: underline; }
+.about-body { margin-top: 8px; font-size: 0.84rem; line-height: 1.6; color: var(--text); }
+.about-body p { margin-bottom: 8px; }
+.about-body ul { padding-left: 4px; list-style: none; }
+.about-body li { margin-bottom: 8px; }
 .model-row { display: flex; gap: 6px; margin-top: 4px; }
 .model-row select { flex: 1; min-width: 0; }
 .model-row .pager-btn { padding: 8px 12px; }
