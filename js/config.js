@@ -6,6 +6,6 @@ const YOUVERSION_APP_KEY = "qbm8XmKaOzIz13aHVCrcgd9vfWAfRr6Ge6LoPV8w5i7NaLLf";
 
 // Supabase (로그인·회원관리·공유 API 키). 값을 비우면 로그인 기능이 숨겨진다.
 // SUPABASE_ANON_KEY는 공개용(anon) 키로, 노출되어도 RLS 정책이 접근을 통제한다.
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://tejskduprrgwmcixalbw.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_q1sm6Mx3mtqTyATFxK7SZQ_w1W8OGXy";
 const ADMIN_EMAIL = "linkedsugi@gmail.com"; // 표시용 (실제 권한은 DB의 is_admin()이 결정)
