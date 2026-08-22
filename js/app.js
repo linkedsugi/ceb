@@ -507,12 +507,12 @@ const Annotations = (() => {
 
   function get(b, c, v) { return load()[key(b, c, v)] || null; }
 
-  // patch: { b?: 책갈피, h?: 형광펜 색, u?: 밑줄 }. 모두 비면 항목 삭제.
+  // patch: { b?: 책갈피, h?: 형광펜 색, u?: 밑줄, n?: 노트 }. 모두 비면 항목 삭제.
   function set(b, c, v, patch, snippet) {
     load();
     const k = key(b, c, v);
     const next = Object.assign({}, data[k] || {}, patch);
-    if (!next.b && !next.h && !next.u) {
+    if (!next.b && !next.h && !next.u && !next.n) {
       delete data[k];
       persist();
       return null;
@@ -526,7 +526,7 @@ const Annotations = (() => {
     return next;
   }
 
-  function clear(b, c, v) { return set(b, c, v, { b: null, h: null, u: null }); }
+  function clear(b, c, v) { return set(b, c, v, { b: null, h: null, u: null, n: null }); }
 
   function list() {
     load();
@@ -542,12 +542,22 @@ const Annotations = (() => {
 const HL_COLORS = ["yellow", "green", "blue", "pink"];
 
 function applyAnnotationClasses(row, ann) {
-  row.classList.remove("bookmarked", "underlined");
+  row.classList.remove("bookmarked", "underlined", "noted");
   HL_COLORS.forEach((c) => row.classList.remove("hl-" + c));
   if (!ann) return;
   if (ann.b) row.classList.add("bookmarked");
   if (ann.u) row.classList.add("underlined");
   if (ann.h) row.classList.add("hl-" + ann.h);
+  if (ann.n) row.classList.add("noted");
+}
+
+// 본문 절 아래에 개인 노트를 표시/갱신
+function renderVerseNote(row, noteText) {
+  const body = row.querySelector(".verse-body");
+  if (!body) return;
+  const old = body.querySelector(".verse-note");
+  if (old) old.remove();
+  if (noteText) body.appendChild(el("div", "verse-note", noteText));
 }
 
 /* ── 상태 ─────────────────────────────── */
@@ -699,7 +709,9 @@ async function renderChapter(highlightVerse) {
       body.appendChild(ai);
     }
     row.appendChild(body);
-    applyAnnotationClasses(row, Annotations.get(state.book, state.chapter, v + 1));
+    const ann = Annotations.get(state.book, state.chapter, v + 1);
+    applyAnnotationClasses(row, ann);
+    renderVerseNote(row, ann && ann.n);
     row.addEventListener("click", () =>
       openVerseMenu(meta, v + 1, enVerses[v], showKrv ? koVerses[v] : "", aiResult, row));
     reader.appendChild(row);
@@ -766,6 +778,8 @@ function copyVerse(meta, num, enText, koText, aiText) {
     const inf = AiTranslator.info();
     parts.push("(AI 번역 · " + inf.model + ") " + aiText);
   }
+  const noteAnn = Annotations.get(state.book, state.chapter, num);
+  if (noteAnn && noteAnn.n) parts.push("(내 노트) " + noteAnn.n);
   const text = parts.join("\n");
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text)
@@ -866,6 +880,7 @@ function updateVerseMenu() {
   const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
   $("vmBookmark").textContent = ann && ann.b ? "🔖 책갈피 해제" : "🔖 책갈피 추가";
   $("vmUnderline").textContent = ann && ann.u ? "빨간 밑줄 제거" : "빨간 밑줄";
+  $("vmNote").value = (ann && ann.n) || "";
   document.querySelectorAll(".hl-swatch").forEach((s) => {
     s.classList.toggle("sel", (ann && ann.h ? ann.h : "") === s.dataset.hl && s.dataset.hl !== "");
   });
@@ -918,11 +933,13 @@ function openBookmarksPanel() {
       badges.appendChild(dot);
     }
     if (it.u) badges.appendChild(el("span", "bm-underline", "밑줄"));
+    if (it.n) badges.appendChild(el("span", null, "📝"));
     const info = el("div", "bm-info");
     const refLine = el("div", "bm-ref", meta[1] + " " + it.chapter + ":" + it.verse);
     if (it.ts) refLine.appendChild(el("span", "bm-date", formatTs(it.ts)));
     info.appendChild(refLine);
     info.appendChild(el("div", "bm-snippet", it.t || ""));
+    if (it.n) info.appendChild(el("div", "bm-note", "📝 " + it.n));
     row.appendChild(badges);
     row.appendChild(info);
     const del = el("button", "icon-btn bm-del", "✕");
@@ -1320,6 +1337,12 @@ function init() {
   $("vmUnderline").addEventListener("click", () => {
     const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
     mutateVerseAnn({ u: !(ann && ann.u) });
+  });
+  $("vmNoteSave").addEventListener("click", () => {
+    const text = $("vmNote").value.trim();
+    const ann = mutateVerseAnn({ n: text || null });
+    renderVerseNote(verseCtx.row, ann && ann.n);
+    toast(text ? "노트를 저장했습니다" : "노트를 삭제했습니다");
   });
   $("vmCopy").addEventListener("click", () => {
     copyVerse(bookMeta(verseCtx.book), verseCtx.verse, verseCtx.en, verseCtx.ko,
