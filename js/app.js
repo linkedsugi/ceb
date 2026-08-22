@@ -518,6 +518,8 @@ const Annotations = (() => {
       return null;
     }
     if (snippet) next.t = snippet;
+    // 책갈피를 새로 추가하는 순간의 날짜·시각을 기록
+    if (patch.b === true) next.ts = Date.now();
     if (!next.ts) next.ts = Date.now();
     data[k] = next;
     persist();
@@ -886,6 +888,14 @@ function mutateVerseAnn(patch) {
 }
 
 /* ── 저장된 구절 목록 ───────────────────── */
+function formatTs(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "." + p(d.getMonth() + 1) + "." + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
 function openBookmarksPanel() {
   closePanels();
   const box = $("bookmarksList");
@@ -907,7 +917,9 @@ function openBookmarksPanel() {
     }
     if (it.u) badges.appendChild(el("span", "bm-underline", "밑줄"));
     const info = el("div", "bm-info");
-    info.appendChild(el("div", "bm-ref", meta[1] + " " + it.chapter + ":" + it.verse));
+    const refLine = el("div", "bm-ref", meta[1] + " " + it.chapter + ":" + it.verse);
+    if (it.ts) refLine.appendChild(el("span", "bm-date", formatTs(it.ts)));
+    info.appendChild(refLine);
     info.appendChild(el("div", "bm-snippet", it.t || ""));
     row.appendChild(badges);
     row.appendChild(info);
