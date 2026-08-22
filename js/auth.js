@@ -13,6 +13,10 @@ const Auth = (() => {
   let profile = null; // { id, email, display_name, approved }
   const sharedKeyCache = {}; // provider -> api_key (메모리에만 보관)
   const listeners = [];
+  // 저장된 세션 복원(getSession)이 끝나기 전에 공유 키를 조회하면
+  // 로그인 상태인데도 "로그인해 주세요"가 뜬다 — 복원 완료를 기다리는 신호.
+  let readyResolve;
+  const ready = new Promise((resolve) => { readyResolve = resolve; });
 
   function notify() {
     listeners.forEach((fn) => {
@@ -37,11 +41,11 @@ const Auth = (() => {
     sb.auth.onAuthStateChange((_event, s) => {
       session = s;
       Object.keys(sharedKeyCache).forEach((k) => delete sharedKeyCache[k]);
-      refreshProfile().then(notify);
+      refreshProfile().then(notify).then(readyResolve);
     });
     sb.auth.getSession().then(({ data }) => {
       session = data.session;
-      refreshProfile().then(notify);
+      refreshProfile().then(notify).then(readyResolve);
     });
   }
 
@@ -69,6 +73,8 @@ const Auth = (() => {
   // ── 공유 API 키 (승인 회원 전용, RLS가 통제) ──
   async function getSharedKey(provider) {
     if (!enabled) throw new Error("공유 키 기능이 설정되지 않았습니다.");
+    // 세션 복원이 끝날 때까지 대기 (안전을 위해 최대 4초)
+    await Promise.race([ready, new Promise((r) => setTimeout(r, 4000))]);
     if (!session) throw new Error("공유 키를 쓰려면 먼저 구글 로그인해 주세요.");
     if (sharedKeyCache[provider]) return sharedKeyCache[provider];
     const { data, error } = await sb

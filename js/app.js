@@ -1345,6 +1345,14 @@ function init() {
   try {
   Auth.init();
   Auth.onChange(updateAuthUi);
+  // 로그인 확인이 늦게 끝난 경우: 이미 "로그인해 주세요" 류의 AI 오류가
+  // 떠 있으면 자동으로 다시 번역을 시도한다.
+  Auth.onChange(() => {
+    if (Auth.user() && state.koSource !== "krv" &&
+        document.querySelector("#reader .ai-error")) {
+      renderChapter();
+    }
+  });
   if (Auth.enabled()) {
     $("loginBtn").hidden = false;
     $("loginBtn").addEventListener("click", () =>
