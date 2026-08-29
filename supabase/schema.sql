@@ -91,3 +91,38 @@ create policy "shared_keys approved read" on public.shared_keys
 drop policy if exists "shared_keys admin write" on public.shared_keys;
 create policy "shared_keys admin write" on public.shared_keys
   for all using (public.is_admin()) with check (public.is_admin());
+
+-- ── 사용 통계 (회원별 · 일자별 집계) ─────────
+-- 원문 내용은 저장하지 않고 이벤트 횟수만 센다.
+create table if not exists public.usage_stats (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  day date not null,
+  event text not null check (event in ('visit','chapter','ai','search','bookmark','note')),
+  detail text not null default '',   -- ai: "provider:model"
+  count integer not null default 1,
+  primary key (user_id, day, event, detail)
+);
+
+alter table public.usage_stats enable row level security;
+
+-- 읽기는 관리자만 (본인 행 포함 직접 조회 불가 — RPC로만 기록)
+drop policy if exists "usage admin read" on public.usage_stats;
+create policy "usage admin read" on public.usage_stats
+  for select using (public.is_admin());
+
+-- 기록: 로그인한 사용자가 자기 카운터를 1 올린다 (security definer)
+create or replace function public.log_usage(p_event text, p_detail text default '')
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null then return; end if;
+  if p_event not in ('visit','chapter','ai','search','bookmark','note') then return; end if;
+  insert into public.usage_stats (user_id, day, event, detail)
+  values (auth.uid(), (now() at time zone 'utc')::date, p_event, coalesce(left(p_detail, 80), ''))
+  on conflict (user_id, day, event, detail)
+  do update set count = usage_stats.count + 1;
+end;
+$$;
+
+grant execute on function public.log_usage(text, text) to authenticated;

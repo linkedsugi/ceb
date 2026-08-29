@@ -97,6 +97,26 @@ const Auth = (() => {
     return data.api_key;
   }
 
+  // ── 사용 통계 ──────────────────────────
+  // 실패해도 앱 동작에 영향을 주지 않는 부가 기능이라 오류는 조용히 무시한다.
+  function logUsage(event, detail) {
+    if (!enabled || !sb || !session) return;
+    try {
+      sb.rpc("log_usage", { p_event: event, p_detail: detail || "" })
+        .then(() => {}, () => {});
+    } catch (e) { /* 무시 */ }
+  }
+
+  // 최근 N일 통계 (관리자 전용 — RLS가 통제)
+  async function fetchUsage(days) {
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const { data, error } = await sb
+      .from("usage_stats").select("user_id,day,event,count")
+      .gte("day", since);
+    if (error) throw new Error("사용 통계 조회 실패: " + error.message);
+    return data || [];
+  }
+
   // ── 관리자 기능 (RLS가 관리자 외 접근을 거부) ──
   async function listProfiles() {
     const { data, error } = await sb
@@ -137,6 +157,6 @@ const Auth = (() => {
     enabled: () => enabled,
     init, onChange, user, isAdmin, isApproved, canUseShared, signIn, signOut,
     getSharedKey, listProfiles, setApproved, setSharedAccess,
-    getSharedKeys, upsertSharedKey,
+    getSharedKeys, upsertSharedKey, logUsage, fetchUsage,
   };
 })();

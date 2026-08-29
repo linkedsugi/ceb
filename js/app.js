@@ -475,6 +475,8 @@ const AiTranslator = (() => {
 
     memCache[ck] = verses;
     try { localStorage.setItem(ck, JSON.stringify(verses)); } catch (e) { /* 용량 초과 등은 무시 */ }
+    // 실제 API 호출이 일어난 번역만 통계에 기록 (캐시 조회는 제외)
+    try { Auth.logUsage("ai", provider + ":" + conf.model); } catch (e) { /* 무시 */ }
     return verses;
   }
 
@@ -758,6 +760,13 @@ async function renderChapter(highlightVerse) {
   $("prevBtn").disabled = state.book === 1 && state.chapter === 1;
   $("nextBtn").disabled = state.book === 66 && state.chapter === bookMeta(66)[3];
 
+  // 같은 장을 다시 그리는 경우(보기 모드 변경 등)는 제외하고 장 읽기를 기록
+  const usageRef = state.book + ":" + state.chapter;
+  if (usageRef !== renderChapter.lastUsageRef) {
+    renderChapter.lastUsageRef = usageRef;
+    Auth.logUsage("chapter");
+  }
+
   location.hash = "#" + state.book + "/" + state.chapter + (highlightVerse ? "/" + highlightVerse : "");
   saveState();
 
@@ -1019,17 +1028,27 @@ function updateAuthUi() {
   }
 }
 
+let adminData = null; // { profiles, usage, usageError } — 검색 필터 재렌더용
+
 async function openAdminPanel() {
   closePanels();
   $("overlay").hidden = false;
   $("adminPanel").hidden = false;
   const box = $("adminMembers");
   box.textContent = "불러오는 중…";
+  $("memberSearch").value = "";
   try {
     const [profiles, keys] = await Promise.all([Auth.listProfiles(), Auth.getSharedKeys()]);
     $("sharedOpenai").value = keys.openai || "";
     $("sharedGemini").value = keys.gemini || "";
-    renderMembers(profiles);
+    let usage = [], usageError = false;
+    try {
+      usage = await Auth.fetchUsage(30);
+    } catch (e) {
+      usageError = true; // usage_stats 미설치 등 — 통계 없이 회원 목록만 표시
+    }
+    adminData = { profiles, usage, usageError };
+    renderMembers();
   } catch (err) {
     box.textContent = (err && err.message) || "불러오지 못했습니다.";
   }
@@ -1054,18 +1073,78 @@ function memberSwitch(caption, checked, disabled, title, onChange) {
   return group;
 }
 
-function renderMembers(profiles) {
+// 최근 30일 usage_stats 행을 회원별 요약으로 집계
+function summarizeUsage(usage) {
+  const week = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const byUser = {};
+  const totals7 = { users: new Set(), ai: 0, chapter: 0 };
+  (usage || []).forEach((r) => {
+    const u = byUser[r.user_id] ||
+      (byUser[r.user_id] = { days: new Set(), ev: {}, last: "" });
+    u.days.add(r.day);
+    u.ev[r.event] = (u.ev[r.event] || 0) + r.count;
+    if (r.day > u.last) u.last = r.day;
+    if (r.day >= week) {
+      totals7.users.add(r.user_id);
+      if (r.event === "ai") totals7.ai += r.count;
+      if (r.event === "chapter") totals7.chapter += r.count;
+    }
+  });
+  return { byUser, totals7 };
+}
+
+function memberUsageText(u) {
+  if (!u) return "최근 30일 활동 없음";
+  const n = (ev) => u.ev[ev] || 0;
+  const parts = ["접속 " + u.days.size + "일"];
+  if (n("chapter")) parts.push("읽기 " + n("chapter") + "장");
+  if (n("ai")) parts.push("AI 번역 " + n("ai") + "회");
+  if (n("search")) parts.push("검색 " + n("search"));
+  if (n("bookmark") + n("note")) parts.push("책갈피·노트 " + (n("bookmark") + n("note")));
+  return "최근 활동 " + u.last + " · 30일간 " + parts.join(" · ");
+}
+
+function renderMembers() {
+  const { profiles, usage, usageError } = adminData;
   const box = $("adminMembers");
   box.innerHTML = "";
+  const { byUser, totals7 } = summarizeUsage(usage);
   const pendingCount = profiles.filter((p) => !p.approved).length;
   box.appendChild(el("div", "admin-summary",
     "회원 " + profiles.length + "명" +
-    (pendingCount ? " · 승인 대기 " + pendingCount + "명" : "")));
+    (pendingCount ? " · 승인 대기 " + pendingCount + "명" : "") +
+    (usageError ? "" :
+      " · 7일 활성 " + totals7.users.size + "명 · 7일 읽기 " + totals7.chapter +
+      "장 · 7일 AI 번역 " + totals7.ai + "회")));
+  if (usageError) {
+    box.appendChild(el("div", "settings-note",
+      "사용 통계를 불러오지 못했습니다. supabase/schema.sql 최신본을 SQL Editor에서 " +
+      "한 번 실행하면 통계가 수집됩니다."));
+  }
   if (!profiles.length) {
     box.appendChild(el("div", "settings-note", "아직 가입한 회원이 없습니다."));
     return;
   }
-  profiles.forEach((p) => {
+
+  // 검색 필터 + 정렬: 관리자 → 승인 대기 → 최근 활동순
+  const q = $("memberSearch").value.trim().toLowerCase();
+  const list = profiles.filter((p) => !q ||
+    (p.email || "").toLowerCase().includes(q) ||
+    (p.display_name || "").toLowerCase().includes(q));
+  list.sort((a, b) => {
+    const rank = (p) => p.email === ADMIN_EMAIL ? 0 : (!p.approved ? 1 : 2);
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    const la = (byUser[a.id] && byUser[a.id].last) || "";
+    const lb = (byUser[b.id] && byUser[b.id].last) || "";
+    if (la !== lb) return la < lb ? 1 : -1;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+  if (!list.length) {
+    box.appendChild(el("div", "settings-note", "검색 결과가 없습니다."));
+    return;
+  }
+
+  list.forEach((p) => {
     const isAdminRow = p.email === ADMIN_EMAIL;
     const row = el("div", "member-row" + (!p.approved && !isAdminRow ? " pending" : ""));
     const info = el("div", "member-info");
@@ -1074,6 +1153,9 @@ function renderMembers(profiles) {
     info.appendChild(el("div", "member-meta",
       (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10) +
       (!p.approved && !isAdminRow ? " · 승인 대기" : "")));
+    if (!usageError) {
+      info.appendChild(el("div", "member-usage", memberUsageText(byUser[p.id])));
+    }
     row.appendChild(info);
 
     if (isAdminRow) {
@@ -1228,6 +1310,7 @@ async function runSearch() {
     return;
   }
   const token = ++searchToken;
+  Auth.logUsage("search");
   const isKorean = /[가-힣]/.test(q);
   // 온라인 번역본은 검색 API가 없으므로 영어 검색은 오프라인 WEB 본문 기준
   const onlineNote = !isKorean && isOnlineVersion(state.version);
@@ -1347,7 +1430,12 @@ function init() {
   Auth.onChange(updateAuthUi);
   // 로그인 확인이 늦게 끝난 경우: 이미 "로그인해 주세요" 류의 AI 오류가
   // 떠 있으면 자동으로 다시 번역을 시도한다.
+  let visitLogged = false;
   Auth.onChange(() => {
+    if (Auth.user() && !visitLogged) {
+      visitLogged = true;
+      Auth.logUsage("visit"); // 하루 단위로 집계되는 접속 기록
+    }
     if (Auth.user() && state.koSource !== "krv" &&
         document.querySelector("#reader .ai-error")) {
       renderChapter();
@@ -1361,6 +1449,9 @@ function init() {
       Auth.signOut().then(() => toast("로그아웃되었습니다")));
     $("adminBtn").addEventListener("click", openAdminPanel);
     $("adminClose").addEventListener("click", closePanels);
+    $("memberSearch").addEventListener("input", () => {
+      if (adminData) renderMembers();
+    });
     $("sharedKeysSave").addEventListener("click", async () => {
       const btn = $("sharedKeysSave");
       btn.disabled = true;
@@ -1389,6 +1480,7 @@ function init() {
   $("vmBookmark").addEventListener("click", () => {
     const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
     const next = mutateVerseAnn({ b: !(ann && ann.b) });
+    if (next && next.b) Auth.logUsage("bookmark");
     toast(next && next.b ? "책갈피에 추가했습니다" : "책갈피를 해제했습니다");
   });
   $("vmUnderline").addEventListener("click", () => {
@@ -1402,6 +1494,7 @@ function init() {
   $("vmNoteSave").addEventListener("click", () => {
     const text = $("vmNote").value.trim();
     const ann = mutateVerseAnn({ n: text || null });
+    if (text) Auth.logUsage("note");
     renderVerseNote(verseCtx.row, ann && ann.n);
     closePanels(); // 저장 후 패널을 닫아 본문의 노트가 바로 보이게
     toast(text ? "노트를 저장했습니다" : "노트를 삭제했습니다");
