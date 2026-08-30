@@ -70,11 +70,16 @@ on conflict (id) do update
 
 -- ── 공유 API 키 (승인된 회원만 읽기, 관리자만 쓰기) ──
 create table if not exists public.shared_keys (
-  provider text primary key check (provider in ('openai', 'gemini')),
+  provider text primary key,
   api_key text not null,
   note text,
   updated_at timestamptz not null default now()
 );
+
+-- 허용 공급자 (기존 설치본 업그레이드 시에도 elevenlabs가 포함되도록 재생성)
+alter table public.shared_keys drop constraint if exists shared_keys_provider_check;
+alter table public.shared_keys add constraint shared_keys_provider_check
+  check (provider in ('openai', 'gemini', 'elevenlabs'));
 
 alter table public.shared_keys enable row level security;
 
@@ -97,11 +102,15 @@ create policy "shared_keys admin write" on public.shared_keys
 create table if not exists public.usage_stats (
   user_id uuid not null references auth.users(id) on delete cascade,
   day date not null,
-  event text not null check (event in ('visit','chapter','ai','search','bookmark','note')),
-  detail text not null default '',   -- ai: "provider:model"
+  event text not null,
+  detail text not null default '',   -- ai: "provider:model", tts: "provider"
   count integer not null default 1,
   primary key (user_id, day, event, detail)
 );
+
+alter table public.usage_stats drop constraint if exists usage_stats_event_check;
+alter table public.usage_stats add constraint usage_stats_event_check
+  check (event in ('visit','chapter','ai','search','bookmark','note','tts'));
 
 alter table public.usage_stats enable row level security;
 
@@ -117,7 +126,7 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if auth.uid() is null then return; end if;
-  if p_event not in ('visit','chapter','ai','search','bookmark','note') then return; end if;
+  if p_event not in ('visit','chapter','ai','search','bookmark','note','tts') then return; end if;
   insert into public.usage_stats (user_id, day, event, detail)
   values (auth.uid(), (now() at time zone 'utc')::date, p_event, coalesce(left(p_detail, 80), ''))
   on conflict (user_id, day, event, detail)

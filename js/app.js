@@ -219,6 +219,20 @@ const AiTranslator = (() => {
       model: "gemini-3.6-flash",
       models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
     },
+    // 음성 읽기(TTS). Gemini TTS는 위 gemini 키를 그대로 사용한다.
+    tts: {
+      provider: "gemini",     // gemini | elevenlabs
+      target: "ko",           // ko | en | both (절마다 영어→한국어)
+      gemini: { voice: "Kore", model: "gemini-2.5-flash-preview-tts" },
+      elevenlabs: {
+        key: "",
+        useShared: false,
+        voiceId: "21m00Tcm4TlvDq8ikWAM", // Rachel (기본 제공 음성)
+        voiceName: "Rachel",
+        model: "eleven_multilingual_v2",
+        voices: [],           // ↻로 불러온 [{id,name}] 목록
+      },
+    },
   };
 
   function getSettings() {
@@ -236,6 +250,13 @@ const AiTranslator = (() => {
     merged.openai.base = (merged.openai.base || DEFAULTS.openai.base).replace(/\/+$/, "");
     if (!merged.openai.models || !merged.openai.models.length) merged.openai.models = DEFAULTS.openai.models.slice();
     if (!merged.gemini.models || !merged.gemini.models.length) merged.gemini.models = DEFAULTS.gemini.models.slice();
+    const t = s.tts || {};
+    merged.tts = {
+      provider: t.provider === "elevenlabs" ? "elevenlabs" : "gemini",
+      target: ["ko", "en", "both"].indexOf(t.target) !== -1 ? t.target : "ko",
+      gemini: Object.assign({}, DEFAULTS.tts.gemini, t.gemini),
+      elevenlabs: Object.assign({}, DEFAULTS.tts.elevenlabs, t.elevenlabs),
+    };
     return merged;
   }
 
@@ -490,7 +511,245 @@ const AiTranslator = (() => {
     };
   }
 
-  return { getSettings, saveSettings, configured, translateChapter, clearCache, listModels, info };
+  return { getSettings, saveSettings, configured, translateChapter, clearCache,
+    listModels, info, resolveKey };
+})();
+
+/* ── 음성 읽기 (TTS: Gemini / ElevenLabs) ────
+ * 현재 화면의 본문을 절 단위로 합성해 순서대로 재생한다.
+ * Gemini TTS는 AI 번역의 Gemini 키(본인/공유)를 그대로 사용한다.
+ */
+const Tts = (() => {
+  const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+  const ELEVEN_BASE = "https://api.elevenlabs.io/v1";
+  // Gemini 프리셋 음성 (2026-08 기준 대표 목록)
+  const GEMINI_VOICES = ["Kore", "Puck", "Zephyr", "Charon", "Fenrir", "Leda",
+    "Orus", "Aoede", "Enceladus", "Umbriel", "Despina", "Achernar", "Schedar", "Sulafat"];
+
+  const audio = new Audio();
+  let queue = [];        // [{ verse, text }]
+  let idx = 0;
+  let active = false;
+  let paused = false;
+  let session = 0;       // 재생 세션 토큰 (정지/재시작 경합 방지)
+  const urlCache = {};   // idx -> objectURL
+  const pending = {};    // idx -> Promise<objectURL>
+
+  function conf() { return AiTranslator.getSettings().tts; }
+
+  // 16-bit PCM(mono)을 WAV로 감싼다 — Gemini TTS는 원시 PCM(base64)을 준다
+  function pcmToWavBlob(bytes, sampleRate) {
+    const h = new ArrayBuffer(44);
+    const v = new DataView(h);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + bytes.length, true); w(8, "WAVE");
+    w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, "data"); v.setUint32(40, bytes.length, true);
+    return new Blob([h, bytes], { type: "audio/wav" });
+  }
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  async function synthGemini(text) {
+    const s = AiTranslator.getSettings();
+    const apiKey = await AiTranslator.resolveKey("gemini", s.gemini);
+    const t = conf().gemini;
+    const res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(t.model) + ":generateContent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: t.voice } } },
+        },
+      }),
+    });
+    if (!res.ok) {
+      let msg = "";
+      try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+      throw new Error("Gemini 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+    }
+    const j = await res.json();
+    const parts = (j.candidates && j.candidates[0] && j.candidates[0].content &&
+      j.candidates[0].content.parts) || [];
+    const part = parts.find((p) => p.inlineData && p.inlineData.data);
+    if (!part) throw new Error("Gemini 음성 응답이 비어 있습니다.");
+    const mime = part.inlineData.mimeType || "";
+    const bytes = b64ToBytes(part.inlineData.data);
+    if (/wav|mpeg|mp3|ogg/.test(mime)) {
+      return URL.createObjectURL(new Blob([bytes], { type: mime }));
+    }
+    const rate = Number((mime.match(/rate=(\d+)/) || [])[1]) || 24000; // audio/L16;rate=24000
+    return URL.createObjectURL(pcmToWavBlob(bytes, rate));
+  }
+
+  async function resolveElevenKey(el) {
+    if (el.useShared && Auth.enabled()) return Auth.getSharedKey("elevenlabs");
+    if (!el.key) throw new Error("⚙️ 설정에서 ElevenLabs API 키를 입력해 주세요.");
+    return el.key;
+  }
+
+  async function synthEleven(text) {
+    const el = conf().elevenlabs;
+    const apiKey = await resolveElevenKey(el);
+    const res = await fetch(ELEVEN_BASE + "/text-to-speech/" +
+      encodeURIComponent(el.voiceId) + "?output_format=mp3_44100_128", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
+      body: JSON.stringify({ text, model_id: el.model }),
+    });
+    if (!res.ok) {
+      let msg = "";
+      try {
+        const j = await res.json();
+        msg = (j.detail && (j.detail.message || j.detail)) || j.message || "";
+        if (typeof msg !== "string") msg = JSON.stringify(msg);
+      } catch (e) { /* 무시 */ }
+      throw new Error("ElevenLabs 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+    }
+    return URL.createObjectURL(await res.blob());
+  }
+
+  // ElevenLabs 음성 목록 (설정의 ↻ 버튼)
+  async function listElevenVoices(apiKey) {
+    const res = await fetch(ELEVEN_BASE + "/voices", { headers: { "xi-api-key": apiKey } });
+    if (!res.ok) throw new Error("음성 목록 조회 실패 (" + res.status + ")");
+    const j = await res.json();
+    const voices = (j.voices || []).map((v) => ({ id: v.voice_id, name: v.name }));
+    if (!voices.length) throw new Error("사용 가능한 음성이 없습니다.");
+    return voices;
+  }
+
+  function synth(text) {
+    return conf().provider === "elevenlabs" ? synthEleven(text) : synthGemini(text);
+  }
+
+  function getUrl(i) {
+    if (urlCache[i]) return Promise.resolve(urlCache[i]);
+    if (!pending[i]) {
+      pending[i] = synth(queue[i].text).then((u) => { urlCache[i] = u; return u; });
+      pending[i].catch(() => { delete pending[i]; });
+    }
+    return pending[i];
+  }
+
+  // 현재 화면(reader DOM)에서 절 텍스트를 모아 재생 목록을 만든다
+  function buildQueue(fromVerse) {
+    const target = conf().target;
+    const items = [];
+    document.querySelectorAll("#reader .verse").forEach((row) => {
+      const verse = Number(row.dataset.verse);
+      if (verse < fromVerse) return;
+      const en = row.querySelector(".verse-en");
+      const koNode = row.querySelector(".verse-ko") || row.querySelector(".verse-ai:not(.pending)");
+      const ko = koNode && koNode.textContent.trim();
+      if ((target === "en" || target === "both") && en && en.textContent.trim()) {
+        items.push({ verse, text: en.textContent.trim() });
+      }
+      if ((target === "ko" || target === "both") && ko) {
+        items.push({ verse, text: ko });
+      }
+    });
+    return items;
+  }
+
+  function highlight(verse) {
+    document.querySelectorAll("#reader .verse.tts-playing")
+      .forEach((n) => n.classList.remove("tts-playing"));
+    if (verse == null) return;
+    const row = document.querySelector('#reader .verse[data-verse="' + verse + '"]');
+    if (row) {
+      row.classList.add("tts-playing");
+      row.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  function updateBar() {
+    if (!active) { $("ttsBar").hidden = true; return; }
+    $("ttsBar").hidden = false;
+    const item = queue[idx];
+    const meta = bookMeta(state.book);
+    $("ttsInfo").textContent = "🔊 " + meta[1] + " " + state.chapter + ":" +
+      (item ? item.verse : "") + " (" + (idx + 1) + "/" + queue.length + ")";
+    $("ttsToggle").textContent = paused ? "▶" : "⏸";
+  }
+
+  async function playIndex(i) {
+    const my = session;
+    idx = i;
+    if (i >= queue.length) { stop(); toast("음성 읽기를 마쳤습니다"); return; }
+    updateBar();
+    highlight(queue[i].verse);
+    let url;
+    try {
+      url = await getUrl(i);
+    } catch (err) {
+      if (my !== session) return;
+      stop();
+      toast(err && err.message ? err.message : "음성 합성에 실패했습니다");
+      return;
+    }
+    if (my !== session) return;
+    if (i + 1 < queue.length) getUrl(i + 1).catch(() => {}); // 다음 절 미리 합성
+    audio.src = url;
+    try { await audio.play(); } catch (e) { /* 자동재생 차단 등 — 바에서 ▶로 재개 */ }
+  }
+
+  function playFrom(fromVerse) {
+    stop();
+    queue = buildQueue(fromVerse || 1);
+    if (!queue.length) {
+      toast(conf().target === "ko"
+        ? "읽을 한국어 본문이 없습니다. 보기 모드를 확인해 주세요."
+        : "읽을 본문이 없습니다.");
+      return;
+    }
+    session++;
+    active = true;
+    paused = false;
+    Auth.logUsage("tts", conf().provider);
+    playIndex(0);
+  }
+
+  function toggle() {
+    if (!active) return;
+    if (paused) { paused = false; audio.play().catch(() => {}); }
+    else { paused = true; audio.pause(); }
+    updateBar();
+  }
+
+  function stop() {
+    session++;
+    active = false;
+    paused = false;
+    audio.pause();
+    audio.removeAttribute("src");
+    highlight(null);
+    Object.keys(urlCache).forEach((k) => {
+      URL.revokeObjectURL(urlCache[k]);
+      delete urlCache[k];
+    });
+    Object.keys(pending).forEach((k) => delete pending[k]);
+    queue = [];
+    idx = 0;
+    const bar = $("ttsBar");
+    if (bar) bar.hidden = true;
+  }
+
+  audio.addEventListener("ended", () => {
+    if (active && !paused) playIndex(idx + 1);
+  });
+
+  return { playFrom, toggle, stop, listElevenVoices, GEMINI_VOICES,
+    isActive: () => active };
 })();
 
 /* ── 구절 주석 (책갈피·형광펜·밑줄, localStorage) ── */
@@ -649,6 +908,7 @@ async function renderChapter(highlightVerse) {
   const meta = bookMeta(state.book);
   const reader = $("reader");
   const token = ++renderToken;
+  Tts.stop(); // 장이 바뀌면 음성 읽기 중단
   $("refText").textContent = meta[1] + " " + state.chapter + "장";
   document.title = meta[1] + " " + state.chapter + "장 — Bible Canvas";
   reader.className = "reader mode-" + state.mode;
@@ -689,6 +949,10 @@ async function renderChapter(highlightVerse) {
   const heading = el("h1", "chapter-heading", meta[1] + " " + state.chapter + "장");
   const sub = el("span", "sub", meta[2] + " " + state.chapter);
   heading.appendChild(sub);
+  const listen = el("button", "listen-btn", "🔊 듣기");
+  listen.title = "이 장을 음성으로 듣기 (1절부터)";
+  listen.addEventListener("click", () => Tts.playFrom(1));
+  heading.appendChild(listen);
   reader.appendChild(heading);
 
   if (en.title && state.mode !== "ko") {
@@ -1041,6 +1305,7 @@ async function openAdminPanel() {
     const [profiles, keys] = await Promise.all([Auth.listProfiles(), Auth.getSharedKeys()]);
     $("sharedOpenai").value = keys.openai || "";
     $("sharedGemini").value = keys.gemini || "";
+    $("sharedEleven").value = keys.elevenlabs || "";
     let usage = [], usageError = false;
     try {
       usage = await Auth.fetchUsage(30);
@@ -1100,6 +1365,7 @@ function memberUsageText(u) {
   if (n("chapter")) parts.push("읽기 " + n("chapter") + "장");
   if (n("ai")) parts.push("AI 번역 " + n("ai") + "회");
   if (n("search")) parts.push("검색 " + n("search"));
+  if (n("tts")) parts.push("듣기 " + n("tts") + "회");
   if (n("bookmark") + n("note")) parts.push("책갈피·노트 " + (n("bookmark") + n("note")));
   return "최근 활동 " + u.last + " · 30일간 " + parts.join(" · ");
 }
@@ -1235,6 +1501,97 @@ function fillSettingsForm() {
   $("aiBaseField").hidden = p !== "openai";
   $("aiBase").value = settingsDraft.openai.base;
   populateModelSelect(conf.models, conf.model);
+  fillTtsForm();
+}
+
+// ── 음성 읽기(TTS) 설정 폼 ──
+function fillTtsForm() {
+  const t = settingsDraft.tts;
+  $("ttsProvider").value = t.provider;
+  $("ttsTarget").value = t.target;
+  const isEleven = t.provider === "elevenlabs";
+  $("ttsGeminiVoiceField").hidden = isEleven;
+  $("ttsGeminiModelField").hidden = isEleven;
+  $("ttsElKeySourceField").hidden = !isEleven || !Auth.enabled();
+  $("ttsElKeyField").hidden = !isEleven ||
+    (t.elevenlabs.useShared && Auth.enabled());
+  $("ttsElVoiceField").hidden = !isEleven;
+  $("ttsElModelField").hidden = !isEleven;
+  // Gemini 음성 목록
+  const gv = $("ttsGeminiVoice");
+  if (!gv.options.length) {
+    Tts.GEMINI_VOICES.forEach((v) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = v;
+      gv.appendChild(o);
+    });
+  }
+  gv.value = Tts.GEMINI_VOICES.indexOf(t.gemini.voice) !== -1 ? t.gemini.voice : "Kore";
+  $("ttsGeminiModel").value = t.gemini.model;
+  // ElevenLabs
+  $("ttsElKeySource").value = t.elevenlabs.useShared && Auth.enabled() ? "shared" : "own";
+  $("ttsElKey").value = t.elevenlabs.key;
+  $("ttsElModel").value = t.elevenlabs.model;
+  populateElevenVoices(t.elevenlabs.voices, t.elevenlabs.voiceId, t.elevenlabs.voiceName);
+}
+
+function populateElevenVoices(voices, selectedId, selectedName) {
+  const sel = $("ttsElVoice");
+  sel.innerHTML = "";
+  const list = (voices || []).slice();
+  if (selectedId && !list.some((v) => v.id === selectedId)) {
+    list.unshift({ id: selectedId, name: selectedName || selectedId });
+  }
+  list.forEach((v) => {
+    const o = document.createElement("option");
+    o.value = v.id; o.textContent = v.name;
+    sel.appendChild(o);
+  });
+  sel.value = selectedId || (list[0] && list[0].id) || "";
+}
+
+function collectTtsForm() {
+  const t = settingsDraft.tts;
+  t.provider = $("ttsProvider").value === "elevenlabs" ? "elevenlabs" : "gemini";
+  t.target = $("ttsTarget").value;
+  t.gemini.voice = $("ttsGeminiVoice").value || t.gemini.voice;
+  const gm = $("ttsGeminiModel").value.trim();
+  if (gm) t.gemini.model = gm;
+  t.elevenlabs.useShared = Auth.enabled() && $("ttsElKeySource").value === "shared";
+  t.elevenlabs.key = $("ttsElKey").value.trim();
+  t.elevenlabs.model = $("ttsElModel").value;
+  const sel = $("ttsElVoice");
+  if (sel.value) {
+    t.elevenlabs.voiceId = sel.value;
+    t.elevenlabs.voiceName = sel.options[sel.selectedIndex]
+      ? sel.options[sel.selectedIndex].textContent : sel.value;
+  }
+}
+
+async function refreshElevenVoices() {
+  collectSettingsForm();
+  const btn = $("ttsElVoiceRefresh");
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const el = settingsDraft.tts.elevenlabs;
+    const key = el.useShared && Auth.enabled()
+      ? await Auth.getSharedKey("elevenlabs") : el.key;
+    if (!key) throw new Error("먼저 ElevenLabs API 키를 입력해 주세요.");
+    const voices = await Tts.listElevenVoices(key);
+    el.voices = voices;
+    if (!voices.some((v) => v.id === el.voiceId)) {
+      el.voiceId = voices[0].id;
+      el.voiceName = voices[0].name;
+    }
+    populateElevenVoices(voices, el.voiceId, el.voiceName);
+    toast("음성 " + voices.length + "개를 불러왔습니다");
+  } catch (err) {
+    toast(err && err.message ? err.message : "음성 목록을 불러오지 못했습니다");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻";
+  }
 }
 
 // 폼의 현재 입력값을 편집본의 해당 공급자 설정에 반영
@@ -1250,6 +1607,7 @@ function collectSettingsForm() {
   const sel = $("aiModelSel").value;
   const model = sel === "__custom__" ? $("aiModelCustom").value.trim() : sel;
   if (model) conf.model = model;
+  collectTtsForm();
 }
 
 function openSettings(hint) {
@@ -1422,6 +1780,15 @@ function init() {
   $("aiKeySource").addEventListener("change", (e) => {
     $("aiKeyField").hidden = e.target.value === "shared";
   });
+  $("ttsProvider").addEventListener("change", () => {
+    collectSettingsForm();
+    fillTtsForm();
+  });
+  $("ttsElKeySource").addEventListener("change", () => {
+    collectSettingsForm();
+    fillTtsForm();
+  });
+  $("ttsElVoiceRefresh").addEventListener("click", refreshElevenVoices);
 
   // 로그인 모듈이 실패해도(스크립트 캐시 불일치·로드 실패 등)
   // 본문 읽기 기능은 그대로 동작해야 한다.
@@ -1458,6 +1825,7 @@ function init() {
       try {
         await Auth.upsertSharedKey("openai", $("sharedOpenai").value.trim());
         await Auth.upsertSharedKey("gemini", $("sharedGemini").value.trim());
+        await Auth.upsertSharedKey("elevenlabs", $("sharedEleven").value.trim());
         toast("공유 키가 저장되었습니다");
       } catch (err) {
         toast(err.message);
@@ -1487,6 +1855,13 @@ function init() {
     const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
     mutateVerseAnn({ u: !(ann && ann.u) });
   });
+  $("vmListen").addEventListener("click", () => {
+    const v = verseCtx.verse;
+    closePanels();
+    Tts.playFrom(v);
+  });
+  $("ttsToggle").addEventListener("click", () => Tts.toggle());
+  $("ttsStop").addEventListener("click", () => Tts.stop());
   $("vmNote").addEventListener("focus", () => {
     // 모바일 키보드가 올라와도 입력란·저장 버튼이 보이도록
     setTimeout(() => $("vmNote").scrollIntoView({ block: "center", behavior: "smooth" }), 250);

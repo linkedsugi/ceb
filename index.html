@@ -84,6 +84,9 @@
           <li><b>🧭 빠른 탐색</b> — 상단의 책·장 버튼을 누르면 책/장/절을 한 화면에서
             선택합니다. 본문을 좌우로 밀면 이전/다음 장으로 이동하고,
             🔍 검색은 한국어·영어 모두 지원합니다.</li>
+          <li><b>🔊 음성 읽기</b> — 본문 상단의 듣기 버튼이나 절 메뉴의
+            "이 절부터 듣기"로 영어·한국어 본문을 음성으로 들을 수 있습니다.
+            Google Gemini TTS 또는 ElevenLabs 중 선택 (⚙️ 설정).</li>
           <li><b>🔖 개인 기록</b> — 절을 누르면 책갈피(저장 시각 기록), 형광펜 4색,
             빨간 밑줄, 나만의 노트를 남길 수 있습니다. 기록은 이 기기의 브라우저에
             저장됩니다.</li>
@@ -158,6 +161,51 @@
     <label class="settings-field" id="aiBaseField">API 베이스 URL (OpenAI 호환 게이트웨이용)
       <input id="aiBase" type="text" placeholder="https://api.openai.com/v1">
     </label>
+    <div class="testament-label">음성 읽기 (TTS)</div>
+    <p class="settings-note">본문 상단의 🔊 듣기 버튼이나 절 메뉴의 "이 절부터 듣기"로
+      본문을 음성으로 들을 수 있습니다. Gemini는 위 AI 번역의 Gemini API 키를
+      그대로 사용합니다.</p>
+    <label class="settings-field">TTS 공급자
+      <select id="ttsProvider">
+        <option value="gemini">Google Gemini TTS</option>
+        <option value="elevenlabs">ElevenLabs</option>
+      </select>
+    </label>
+    <label class="settings-field">읽어줄 본문
+      <select id="ttsTarget">
+        <option value="ko">한국어</option>
+        <option value="en">영어</option>
+        <option value="both">절마다 영어 → 한국어</option>
+      </select>
+    </label>
+    <label class="settings-field" id="ttsGeminiVoiceField">Gemini 음성
+      <select id="ttsGeminiVoice"></select>
+    </label>
+    <label class="settings-field" id="ttsGeminiModelField">Gemini TTS 모델
+      <input id="ttsGeminiModel" type="text" placeholder="gemini-2.5-flash-preview-tts">
+    </label>
+    <label class="settings-field" id="ttsElKeySourceField" hidden>ElevenLabs 키 사용 방식
+      <select id="ttsElKeySource">
+        <option value="own">내 API 키 직접 입력</option>
+        <option value="shared">공유 키 (관리자 제공 · 승인 회원 전용)</option>
+      </select>
+    </label>
+    <label class="settings-field" id="ttsElKeyField" hidden>ElevenLabs API 키
+      <input id="ttsElKey" type="password" placeholder="sk_..." autocomplete="off">
+    </label>
+    <div class="settings-field" id="ttsElVoiceField" hidden>ElevenLabs 음성
+      <div class="model-row">
+        <select id="ttsElVoice"></select>
+        <button id="ttsElVoiceRefresh" class="pager-btn" title="내 계정의 음성 목록 불러오기">↻</button>
+      </div>
+    </div>
+    <label class="settings-field" id="ttsElModelField" hidden>ElevenLabs 모델
+      <select id="ttsElModel">
+        <option value="eleven_multilingual_v2">Multilingual v2 (한국어 안정)</option>
+        <option value="eleven_v3">Eleven v3 (가장 자연스러움)</option>
+        <option value="eleven_flash_v2_5">Flash v2.5 (빠르고 저렴)</option>
+      </select>
+    </label>
     <div class="settings-actions">
       <button id="aiClearCache" class="pager-btn">번역 캐시 비우기</button>
       <button id="aiSave" class="pager-btn primary">저장</button>
@@ -174,6 +222,7 @@
     <button id="vmBookmark" class="pager-btn">🔖 책갈피 추가</button>
     <button id="vmUnderline" class="pager-btn">빨간 밑줄</button>
     <button id="vmCopy" class="pager-btn">📋 복사</button>
+    <button id="vmListen" class="pager-btn">🔊 이 절부터 듣기</button>
   </div>
   <div class="settings-field">📝 내 노트
     <textarea id="vmNote" rows="3" placeholder="이 구절에 대한 생각을 남겨보세요"></textarea>
@@ -221,6 +270,9 @@
       <label class="settings-field">Gemini 공유 키
         <input id="sharedGemini" type="password" placeholder="AIza... (비우고 저장하면 삭제)" autocomplete="off">
       </label>
+      <label class="settings-field">ElevenLabs 공유 키 (음성 읽기용)
+        <input id="sharedEleven" type="password" placeholder="sk_... (비우고 저장하면 삭제)" autocomplete="off">
+      </label>
       <div class="settings-actions">
         <button id="sharedKeysSave" class="pager-btn primary">공유 키 저장</button>
       </div>
@@ -251,6 +303,12 @@
     <p>절 번호 매김은 번역본에 따라 일부 다를 수 있습니다. 절을 누르면 영·한 본문이 복사됩니다.</p>
   </footer>
 </main>
+
+<div id="ttsBar" class="tts-bar" hidden>
+  <span id="ttsInfo" class="tts-info"></span>
+  <button id="ttsToggle" class="pager-btn" title="일시정지/재개">⏸</button>
+  <button id="ttsStop" class="pager-btn" title="정지">⏹</button>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 

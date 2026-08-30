@@ -90,8 +90,9 @@ const Auth = (() => {
         throw new Error("공용 API 사용 권한이 없습니다. 관리자에게 공용API 허용을 요청하거나 " +
           "본인 키를 직접 입력해 주세요.");
       }
-      throw new Error("관리자가 아직 " +
-        (provider === "gemini" ? "Gemini" : "OpenAI") + " 공유 키를 등록하지 않았습니다.");
+      const labels = { openai: "OpenAI", gemini: "Gemini", elevenlabs: "ElevenLabs" };
+      throw new Error("관리자가 아직 " + (labels[provider] || provider) +
+        " 공유 키를 등록하지 않았습니다.");
     }
     sharedKeyCache[provider] = data.api_key;
     return data.api_key;

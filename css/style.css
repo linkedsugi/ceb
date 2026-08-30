@@ -394,6 +394,28 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .search-hit .snippet { color: var(--text-sub); font-size: 0.92rem; }
 .search-hit mark { background: var(--accent); color: #fff; border-radius: 3px; padding: 0 2px; }
 
+/* ── 음성 읽기(TTS) ─────────────────── */
+.listen-btn {
+  font-size: 0.78rem; font-weight: 600; color: var(--accent);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 10px; margin-left: 10px; vertical-align: middle;
+  white-space: nowrap;
+}
+.listen-btn:hover { background: var(--accent-soft); }
+.verse.tts-playing { background: var(--accent-soft); border-radius: 8px; }
+.tts-bar {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  z-index: 45; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  box-shadow: var(--shadow); max-width: min(92vw, 480px);
+}
+.tts-info {
+  font-size: 0.85rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tts-bar .pager-btn { padding: 6px 12px; }
+
 /* ── 토스트 ────────────────────────── */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
