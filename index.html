@@ -163,12 +163,14 @@
     </label>
     <div class="testament-label">음성 읽기 (TTS)</div>
     <p class="settings-note">본문 상단의 🔊 듣기 버튼이나 절 메뉴의 "이 절부터 듣기"로
-      본문을 음성으로 들을 수 있습니다. Gemini는 위 AI 번역의 Gemini API 키를
-      그대로 사용합니다.</p>
+      본문을 음성으로 들을 수 있습니다. OpenAI·Gemini TTS는 위 AI 번역 섹션에
+      저장된 각 공급자의 API 키를 그대로 사용하며, 선택한 공급자의 키가 없으면
+      키가 있는 쪽으로 자동 전환해 재생합니다.</p>
     <label class="settings-field">TTS 공급자
       <select id="ttsProvider">
-        <option value="gemini">Google Gemini TTS</option>
-        <option value="elevenlabs">ElevenLabs</option>
+        <option value="openai">OpenAI TTS (번역용 OpenAI 키 사용)</option>
+        <option value="gemini">Google Gemini TTS (번역용 Gemini 키 사용)</option>
+        <option value="elevenlabs">ElevenLabs (별도 키)</option>
       </select>
     </label>
     <label class="settings-field">읽어줄 본문
@@ -179,10 +181,16 @@
         <option value="both">절마다 원어 → 한국어</option>
       </select>
     </label>
-    <label class="settings-field" id="ttsGeminiVoiceField">Gemini 음성
+    <label class="settings-field" id="ttsOpenaiVoiceField" hidden>OpenAI 음성
+      <select id="ttsOpenaiVoice"></select>
+    </label>
+    <label class="settings-field" id="ttsOpenaiModelField" hidden>OpenAI TTS 모델
+      <input id="ttsOpenaiModel" type="text" placeholder="gpt-4o-mini-tts">
+    </label>
+    <label class="settings-field" id="ttsGeminiVoiceField" hidden>Gemini 음성
       <select id="ttsGeminiVoice"></select>
     </label>
-    <label class="settings-field" id="ttsGeminiModelField">Gemini TTS 모델
+    <label class="settings-field" id="ttsGeminiModelField" hidden>Gemini TTS 모델
       <input id="ttsGeminiModel" type="text" placeholder="gemini-2.5-flash-preview-tts">
     </label>
     <label class="settings-field" id="ttsElKeySourceField" hidden>ElevenLabs 키 사용 방식
