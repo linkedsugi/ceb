@@ -578,6 +578,17 @@ const Tts = (() => {
     return conf2.key;
   }
 
+  // 성경 낭독 스타일 지시 (OpenAI instructions / Gemini 프롬프트)
+  const NARRATE_INSTRUCTION =
+    "You are narrating the Bible aloud for devotional listening. " +
+    "Read in a calm, warm, reverent tone at a steady, unhurried pace. " +
+    "Let sentences and verses flow naturally into one another as continuous narration — " +
+    "never sound like reading a list. " +
+    "성경을 낭독하듯 차분하고 경건하게, 문장과 문장이 자연스럽게 이어지도록 읽어주세요.";
+  const GEMINI_NARRATE_PREFIX =
+    "다음 성경 본문을 차분하고 경건한 목소리로, 서두르지 않고 문장이 자연스럽게 " +
+    "이어지도록 낭독해줘:\n\n";
+
   // 모델명이 바뀌었을 수 있으므로 404면 알려진 TTS 모델들로 재시도한다
   const GEMINI_TTS_FALLBACKS = ["gemini-2.5-flash-preview-tts",
     "gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts"];
@@ -597,7 +608,7 @@ const Tts = (() => {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
-          contents: [{ parts: [{ text }] }],
+          contents: [{ parts: [{ text: GEMINI_NARRATE_PREFIX + text }] }],
           generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: t.voice } } },
@@ -636,7 +647,7 @@ const Tts = (() => {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
       body: JSON.stringify({ model: t.model, voice: t.voice, input: text,
-        response_format: "mp3" }),
+        instructions: NARRATE_INSTRUCTION, response_format: "mp3" }),
     });
     if (!res.ok) {
       let msg = "";
@@ -652,14 +663,18 @@ const Tts = (() => {
     return el.key;
   }
 
-  async function synthEleven(text) {
+  async function synthEleven(text, prevText, nextText) {
     const el = conf().elevenlabs;
     const apiKey = await resolveElevenKey(el);
+    const body = { text, model_id: el.model };
+    // 앞뒤 문맥으로 절 경계의 억양을 이어준다 (ElevenLabs 지원 기능)
+    if (prevText) body.previous_text = prevText;
+    if (nextText) body.next_text = nextText;
     const res = await fetch(ELEVEN_BASE + "/text-to-speech/" +
       encodeURIComponent(el.voiceId) + "?output_format=mp3_44100_128", {
       method: "POST",
       headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
-      body: JSON.stringify({ text, model_id: el.model }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       let msg = "";
@@ -705,19 +720,44 @@ const Tts = (() => {
     return t.provider; // 키 없음 — 합성 시 명확한 안내 오류
   }
 
-  function synth(text) {
-    if (currentProvider === "elevenlabs") return synthEleven(text);
-    if (currentProvider === "gemini") return synthGemini(text);
-    return synthOpenai(text);
+  function synth(i) {
+    const item = queue[i];
+    if (currentProvider === "elevenlabs") {
+      // 앞뒤 문맥을 함께 보내 절 경계의 억양이 자연스럽게 이어지게 한다
+      const prev = queue[i - 1] ? queue[i - 1].text.slice(-280) : "";
+      const next = queue[i + 1] ? queue[i + 1].text.slice(0, 280) : "";
+      return synthEleven(item.text, prev, next);
+    }
+    if (currentProvider === "gemini") return synthGemini(item.text);
+    return synthOpenai(item.text);
   }
 
   function getUrl(i) {
     if (urlCache[i]) return Promise.resolve(urlCache[i]);
     if (!pending[i]) {
-      pending[i] = synth(queue[i].text).then((u) => { urlCache[i] = u; return u; });
+      pending[i] = synth(i).then((u) => { urlCache[i] = u; return u; });
       pending[i].catch(() => { delete pending[i]; });
     }
     return pending[i];
+  }
+
+  // 여러 절을 한 항목으로 묶어 한 번에 낭독한다 — 절 사이 끊김이 크게 줄어든다.
+  const CHUNK_CHARS = 420;
+  const CHUNK_MAX_VERSES = 5;
+  function groupItems(items) {
+    const out = [];
+    items.forEach((it) => {
+      const last = out[out.length - 1];
+      if (last && it.verse === last.v2 + 1 && last.count < CHUNK_MAX_VERSES &&
+          last.text.length + it.text.length + 1 <= CHUNK_CHARS) {
+        last.text += " " + it.text;
+        last.v2 = it.verse;
+        last.count++;
+      } else {
+        out.push({ v1: it.verse, v2: it.verse, text: it.text, count: 1 });
+      }
+    });
+    return out;
   }
 
   // 절 텍스트를 모아 재생 목록을 만든다.
@@ -750,18 +790,23 @@ const Tts = (() => {
         items.push({ verse, text: ai });
       }
     });
-    return items;
+    // 원어→한국어 번갈아 읽기는 절 단위 유지, 나머지는 여러 절을 묶는다
+    if (target === "both") {
+      return items.map((it) => ({ v1: it.verse, v2: it.verse, text: it.text }));
+    }
+    return groupItems(items);
   }
 
-  function highlight(verse) {
+  function highlight(item) {
     document.querySelectorAll("#reader .verse.tts-playing")
       .forEach((n) => n.classList.remove("tts-playing"));
-    if (verse == null) return;
-    const row = document.querySelector('#reader .verse[data-verse="' + verse + '"]');
-    if (row) {
-      row.classList.add("tts-playing");
-      row.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!item) return;
+    for (let v = item.v1; v <= item.v2; v++) {
+      const row = document.querySelector('#reader .verse[data-verse="' + v + '"]');
+      if (row) row.classList.add("tts-playing");
     }
+    const first = document.querySelector('#reader .verse[data-verse="' + item.v1 + '"]');
+    if (first) first.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   function updateBar() {
@@ -769,8 +814,9 @@ const Tts = (() => {
     $("ttsBar").hidden = false;
     const item = queue[idx];
     const meta = bookMeta(state.book);
+    const label = item ? (item.v1 === item.v2 ? item.v1 : item.v1 + "-" + item.v2) : "";
     $("ttsInfo").textContent = "🔊 " + meta[1] + " " + state.chapter + ":" +
-      (item ? item.verse : "") + " (" + (idx + 1) + "/" + queue.length + ")";
+      label + " (" + (idx + 1) + "/" + queue.length + ")";
     $("ttsToggle").hidden = false;
     $("ttsToggle").textContent = paused ? "▶" : "⏸";
   }
@@ -792,7 +838,7 @@ const Tts = (() => {
     idx = i;
     if (i >= queue.length) { stop(); toast("음성 읽기를 마쳤습니다"); return; }
     updateBar();
-    highlight(queue[i].verse);
+    highlight(queue[i]);
     let url;
     if (!urlCache[i]) $("ttsInfo").textContent = "🔊 음성 준비 중…";
     try {
