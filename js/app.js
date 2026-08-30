@@ -1422,7 +1422,7 @@ function updateAuthUi() {
   }
 }
 
-let adminData = null; // { profiles, usage, usageError } — 검색 필터 재렌더용
+let adminData = null; // { profiles, usage, usageError, days } — 재렌더용
 
 async function openAdminPanel() {
   closePanels();
@@ -1436,17 +1436,143 @@ async function openAdminPanel() {
     $("sharedOpenai").value = keys.openai || "";
     $("sharedGemini").value = keys.gemini || "";
     $("sharedEleven").value = keys.elevenlabs || "";
-    let usage = [], usageError = false;
-    try {
-      usage = await Auth.fetchUsage(30);
-    } catch (e) {
-      usageError = true; // usage_stats 미설치 등 — 통계 없이 회원 목록만 표시
-    }
-    adminData = { profiles, usage, usageError };
-    renderMembers();
+    adminData = { profiles, usage: [], usageError: false, days: 30 };
+    await loadAdminUsage();
   } catch (err) {
     box.textContent = (err && err.message) || "불러오지 못했습니다.";
   }
+}
+
+// 선택한 기간의 사용 통계를 (재)조회하고 화면을 갱신
+async function loadAdminUsage() {
+  const days = Number($("statPeriod").value) || 30;
+  adminData.days = days;
+  adminData.usageError = false;
+  try {
+    adminData.usage = await Auth.fetchUsage(days);
+  } catch (e) {
+    adminData.usage = [];
+    adminData.usageError = true; // usage_stats 미설치 등 — 통계 없이 회원 목록만 표시
+  }
+  renderDailyStats();
+  renderMembers();
+}
+
+/* ── 일자별 활동 표 ── */
+function renderDailyStats() {
+  const box = $("statDailyBox");
+  box.innerHTML = "";
+  if (adminData.usageError) {
+    box.appendChild(el("div", "settings-note", "통계 없음"));
+    return;
+  }
+  const byDay = {};
+  adminData.usage.forEach((r) => {
+    const d = byDay[r.day] ||
+      (byDay[r.day] = { users: new Set(), chapter: 0, ai: 0, tts: 0, search: 0, rec: 0 });
+    d.users.add(r.user_id);
+    if (r.event === "chapter") d.chapter += r.count;
+    else if (r.event === "ai") d.ai += r.count;
+    else if (r.event === "tts") d.tts += r.count;
+    else if (r.event === "search") d.search += r.count;
+    else if (r.event === "bookmark" || r.event === "note") d.rec += r.count;
+  });
+  const daysList = Object.keys(byDay).sort().reverse();
+  if (!daysList.length) {
+    box.appendChild(el("div", "settings-note", "이 기간에는 기록이 없습니다."));
+    return;
+  }
+  const table = el("table", "stat-table");
+  const head = el("tr");
+  ["날짜", "활성", "읽기", "AI", "듣기", "검색", "기록"].forEach((h) =>
+    head.appendChild(el("th", "", h)));
+  table.appendChild(head);
+  daysList.slice(0, 31).forEach((day) => {
+    const d = byDay[day];
+    const tr = el("tr");
+    [day.slice(5), d.users.size, d.chapter, d.ai, d.tts, d.search, d.rec]
+      .forEach((v, i) => tr.appendChild(el("td", i === 0 ? "stat-day" : "", String(v))));
+    table.appendChild(tr);
+  });
+  box.appendChild(table);
+  if (daysList.length > 31) {
+    box.appendChild(el("div", "settings-note",
+      "최근 31일까지만 표시합니다 (전체는 CSV로 내보내기)."));
+  }
+}
+
+/* ── 통계 CSV 내보내기 ── */
+function exportUsageCsv() {
+  if (!adminData || adminData.usageError || !adminData.usage.length) {
+    toast("내보낼 통계가 없습니다");
+    return;
+  }
+  const emailOf = {};
+  adminData.profiles.forEach((p) => { emailOf[p.id] = p.email; });
+  const esc = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const lines = ["day,email,event,detail,count"];
+  adminData.usage.forEach((r) => {
+    lines.push([r.day, emailOf[r.user_id] || r.user_id, r.event, r.detail || "", r.count]
+      .map(esc).join(","));
+  });
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "bible-canvas-usage-" + adminData.days + "d-" +
+    new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast("통계 CSV를 내려받았습니다 (" + adminData.usage.length + "행)");
+}
+
+/* ── 회원별 일별 상세 ── */
+function buildMemberDetail(userId) {
+  const rows = adminData.usage.filter((r) => r.user_id === userId);
+  const wrap = el("div", "member-detail");
+  if (!rows.length) {
+    wrap.appendChild(el("div", "settings-note", "이 기간에는 기록이 없습니다."));
+    return wrap;
+  }
+  // 일자별 표
+  const byDay = {};
+  rows.forEach((r) => {
+    const d = byDay[r.day] || (byDay[r.day] = { visit: 0, chapter: 0, ai: 0, tts: 0, search: 0, rec: 0 });
+    if (r.event === "visit") d.visit += r.count;
+    else if (r.event === "chapter") d.chapter += r.count;
+    else if (r.event === "ai") d.ai += r.count;
+    else if (r.event === "tts") d.tts += r.count;
+    else if (r.event === "search") d.search += r.count;
+    else if (r.event === "bookmark" || r.event === "note") d.rec += r.count;
+  });
+  const table = el("table", "stat-table");
+  const head = el("tr");
+  ["날짜", "접속", "읽기", "AI", "듣기", "검색", "기록"].forEach((h) =>
+    head.appendChild(el("th", "", h)));
+  table.appendChild(head);
+  Object.keys(byDay).sort().reverse().slice(0, 31).forEach((day) => {
+    const d = byDay[day];
+    const tr = el("tr");
+    [day.slice(5), d.visit, d.chapter, d.ai, d.tts, d.search, d.rec]
+      .forEach((v, i) => tr.appendChild(el("td", i === 0 ? "stat-day" : "", String(v))));
+    table.appendChild(tr);
+  });
+  wrap.appendChild(table);
+  // AI·TTS 모델별 사용
+  const models = {};
+  rows.forEach((r) => {
+    if ((r.event === "ai" || r.event === "tts") && r.detail) {
+      const k = (r.event === "ai" ? "번역 " : "듣기 ") + r.detail;
+      models[k] = (models[k] || 0) + r.count;
+    }
+  });
+  const keys = Object.keys(models).sort((a, b) => models[b] - models[a]);
+  if (keys.length) {
+    wrap.appendChild(el("div", "settings-note",
+      keys.map((k) => k + " " + models[k] + "회").join(" · ")));
+  }
+  return wrap;
 }
 
 // 토글 스위치 하나 (캡션 포함). onChange가 없으면 잠긴 상태로 표시.
@@ -1473,19 +1599,22 @@ function summarizeUsage(usage) {
   const week = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const byUser = {};
   const totals7 = { users: new Set(), ai: 0, chapter: 0 };
+  const totals = { users: new Set(), ev: {} }; // 조회 기간 전체
   (usage || []).forEach((r) => {
     const u = byUser[r.user_id] ||
       (byUser[r.user_id] = { days: new Set(), ev: {}, last: "" });
     u.days.add(r.day);
     u.ev[r.event] = (u.ev[r.event] || 0) + r.count;
     if (r.day > u.last) u.last = r.day;
+    totals.users.add(r.user_id);
+    totals.ev[r.event] = (totals.ev[r.event] || 0) + r.count;
     if (r.day >= week) {
       totals7.users.add(r.user_id);
       if (r.event === "ai") totals7.ai += r.count;
       if (r.event === "chapter") totals7.chapter += r.count;
     }
   });
-  return { byUser, totals7 };
+  return { byUser, totals7, totals };
 }
 
 function memberUsageText(u) {
@@ -1501,10 +1630,10 @@ function memberUsageText(u) {
 }
 
 function renderMembers() {
-  const { profiles, usage, usageError } = adminData;
+  const { profiles, usage, usageError, days } = adminData;
   const box = $("adminMembers");
   box.innerHTML = "";
-  const { byUser, totals7 } = summarizeUsage(usage);
+  const { byUser, totals7, totals } = summarizeUsage(usage);
   const pendingCount = profiles.filter((p) => !p.approved).length;
   box.appendChild(el("div", "admin-summary",
     "회원 " + profiles.length + "명" +
@@ -1512,6 +1641,13 @@ function renderMembers() {
     (usageError ? "" :
       " · 7일 활성 " + totals7.users.size + "명 · 7일 읽기 " + totals7.chapter +
       "장 · 7일 AI 번역 " + totals7.ai + "회")));
+  if (!usageError) {
+    const tv = (ev) => totals.ev[ev] || 0;
+    box.appendChild(el("div", "admin-summary",
+      days + "일간: 활성 " + totals.users.size + "명 · 읽기 " + tv("chapter") +
+      "장 · AI 번역 " + tv("ai") + "회 · 듣기 " + tv("tts") + "회 · 검색 " +
+      tv("search") + " · 책갈피·노트 " + (tv("bookmark") + tv("note"))));
+  }
   if (usageError) {
     box.appendChild(el("div", "settings-note",
       "사용 통계를 불러오지 못했습니다. supabase/schema.sql 최신본을 SQL Editor에서 " +
@@ -1550,7 +1686,24 @@ function renderMembers() {
       (p.display_name || "") + " · 가입 " + String(p.created_at || "").slice(0, 10) +
       (!p.approved && !isAdminRow ? " · 승인 대기" : "")));
     if (!usageError) {
-      info.appendChild(el("div", "member-usage", memberUsageText(byUser[p.id])));
+      const usageLine = el("div", "member-usage", memberUsageText(byUser[p.id]));
+      info.appendChild(usageLine);
+      if (byUser[p.id]) {
+        const btn = el("button", "member-detail-btn", "일별 상세 ▾");
+        let detailEl = null;
+        btn.addEventListener("click", () => {
+          if (detailEl) {
+            detailEl.remove();
+            detailEl = null;
+            btn.textContent = "일별 상세 ▾";
+          } else {
+            detailEl = buildMemberDetail(p.id);
+            info.appendChild(detailEl);
+            btn.textContent = "일별 상세 ▴";
+          }
+        });
+        usageLine.appendChild(btn);
+      }
     }
     row.appendChild(info);
 
@@ -1967,6 +2120,10 @@ function init() {
     $("memberSearch").addEventListener("input", () => {
       if (adminData) renderMembers();
     });
+    $("statPeriod").addEventListener("change", () => {
+      if (adminData) loadAdminUsage();
+    });
+    $("statCsv").addEventListener("click", exportUsageCsv);
     $("sharedKeysSave").addEventListener("click", async () => {
       const btn = $("sharedKeysSave");
       btn.disabled = true;

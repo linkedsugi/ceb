@@ -112,8 +112,10 @@ const Auth = (() => {
   async function fetchUsage(days) {
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     const { data, error } = await sb
-      .from("usage_stats").select("user_id,day,event,count")
-      .gte("day", since);
+      .from("usage_stats").select("user_id,day,event,detail,count")
+      .gte("day", since)
+      .order("day", { ascending: false })
+      .limit(10000);
     if (error) throw new Error("사용 통계 조회 실패: " + error.message);
     return data || [];
   }
