@@ -667,9 +667,11 @@ const Tts = (() => {
     const el = conf().elevenlabs;
     const apiKey = await resolveElevenKey(el);
     const body = { text, model_id: el.model };
-    // 앞뒤 문맥으로 절 경계의 억양을 이어준다 (ElevenLabs 지원 기능)
-    if (prevText) body.previous_text = prevText;
-    if (nextText) body.next_text = nextText;
+    // 앞뒤 문맥으로 절 경계의 억양을 이어준다 (eleven_v3는 이 파라미터를 아직 미지원)
+    if (el.model !== "eleven_v3") {
+      if (prevText) body.previous_text = prevText;
+      if (nextText) body.next_text = nextText;
+    }
     const res = await fetch(ELEVEN_BASE + "/text-to-speech/" +
       encodeURIComponent(el.voiceId) + "?output_format=mp3_44100_128", {
       method: "POST",
