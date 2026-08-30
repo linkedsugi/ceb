@@ -28,7 +28,8 @@ const Auth = (() => {
     profile = null;
     if (!session) return;
     const { data } = await sb
-      .from("profiles").select("id,email,display_name,approved,shared_key_access")
+      .from("profiles")
+      .select("id,email,display_name,approved,shared_key_access,elevenlabs_access")
       .eq("id", session.user.id).maybeSingle();
     profile = data || null;
   }
@@ -61,6 +62,10 @@ const Auth = (() => {
   function canUseShared() {
     return isAdmin() || !!(profile && profile.approved && profile.shared_key_access);
   }
+  // ElevenLabs 음성 사용 권한 (관리자가 특별 승인한 회원만)
+  function canUseEleven() {
+    return isAdmin() || !!(profile && profile.approved && profile.elevenlabs_access);
+  }
 
   async function signIn() {
     await sb.auth.signInWithOAuth({
@@ -82,6 +87,9 @@ const Auth = (() => {
       .eq("provider", provider).maybeSingle();
     if (error) throw new Error("공유 키 조회 실패: " + error.message);
     if (!data) {
+      if (provider === "elevenlabs" && !canUseEleven()) {
+        throw new Error("ElevenLabs 음성은 관리자가 승인한 회원만 사용할 수 있습니다.");
+      }
       if (!isApproved()) {
         throw new Error("공유 키는 관리자 승인 후 사용할 수 있습니다 (현재 승인 대기 중). " +
           "본인 키를 직접 입력해 쓰실 수도 있습니다.");
@@ -123,7 +131,8 @@ const Auth = (() => {
   // ── 관리자 기능 (RLS가 관리자 외 접근을 거부) ──
   async function listProfiles() {
     const { data, error } = await sb
-      .from("profiles").select("id,email,display_name,approved,shared_key_access,created_at")
+      .from("profiles")
+      .select("id,email,display_name,approved,shared_key_access,elevenlabs_access,created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error("회원 목록 조회 실패: " + error.message);
     return data || [];
@@ -135,6 +144,11 @@ const Auth = (() => {
   async function setSharedAccess(id, sharedKeyAccess) {
     const { error } = await sb.from("profiles")
       .update({ shared_key_access: sharedKeyAccess }).eq("id", id);
+    if (error) throw new Error("변경 실패: " + error.message);
+  }
+  async function setElevenAccess(id, allowed) {
+    const { error } = await sb.from("profiles")
+      .update({ elevenlabs_access: allowed }).eq("id", id);
     if (error) throw new Error("변경 실패: " + error.message);
   }
   async function getSharedKeys() {
@@ -158,8 +172,9 @@ const Auth = (() => {
 
   return {
     enabled: () => enabled,
-    init, onChange, user, isAdmin, isApproved, canUseShared, signIn, signOut,
-    getSharedKey, listProfiles, setApproved, setSharedAccess,
+    init, onChange, user, isAdmin, isApproved, canUseShared, canUseEleven,
+    signIn, signOut,
+    getSharedKey, listProfiles, setApproved, setSharedAccess, setElevenAccess,
     getSharedKeys, upsertSharedKey, logUsage, fetchUsage,
   };
 })();

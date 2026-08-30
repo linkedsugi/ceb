@@ -264,9 +264,10 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .admin-panel { width: min(520px, 94vw); }
 .admin-members { display: flex; flex-direction: column; gap: 6px; }
 .member-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
 }
+.member-row .member-info { flex-basis: 100%; }
 .member-info { flex: 1; min-width: 0; }
 .member-email { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; }
 .member-meta { color: var(--text-sub); font-size: 0.75rem; }

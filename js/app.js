@@ -687,7 +687,14 @@ const Tts = (() => {
   let currentProvider = null; // 이번 재생에 실제로 쓰는 공급자
   function pickProvider() {
     const t = conf();
-    if (t.provider === "elevenlabs") return "elevenlabs";
+    if (t.provider === "elevenlabs") {
+      // 관리자가 특별 승인한 회원만 ElevenLabs 사용 가능
+      if (!Auth.enabled() || Auth.canUseEleven()) return "elevenlabs";
+      const alt = hasKey("openai") ? "openai" : (hasKey("gemini") ? "gemini" : "openai");
+      toast("ElevenLabs는 관리자 승인이 필요해 " +
+        (alt === "openai" ? "OpenAI" : "Gemini") + " 음성으로 재생합니다");
+      return alt;
+    }
     if (hasKey(t.provider)) return t.provider;
     const other = t.provider === "openai" ? "gemini" : "openai";
     if (hasKey(other)) {
@@ -1708,9 +1715,10 @@ function renderMembers() {
     row.appendChild(info);
 
     if (isAdminRow) {
-      // 관리자는 항상 승인·공용API 허용 상태
+      // 관리자는 항상 승인·공용API·ElevenLabs 허용 상태
       row.appendChild(memberSwitch("승인", true, true, "관리자는 항상 승인 상태입니다"));
       row.appendChild(memberSwitch("공용API", true, true, "관리자는 항상 공용API를 쓸 수 있습니다"));
+      row.appendChild(memberSwitch("11Labs", true, true, "관리자는 항상 ElevenLabs를 쓸 수 있습니다"));
     } else {
       row.appendChild(memberSwitch("승인", !!p.approved, false,
         "가입 승인 (끄면 차단)", async (input) => {
@@ -1734,6 +1742,21 @@ function renderMembers() {
             await Auth.setSharedAccess(p.id, input.checked);
             p.shared_key_access = input.checked;
             toast(p.email + (p.shared_key_access ? " 공용API 허용됨" : " 공용API 해제됨"));
+          } catch (err) {
+            input.checked = !input.checked;
+            toast(err.message);
+          } finally {
+            input.disabled = false;
+          }
+        }));
+      row.appendChild(memberSwitch("11Labs", !!p.elevenlabs_access, false,
+        "ElevenLabs 음성 사용 특별 승인 (허용된 회원에게만 선택지가 보입니다)",
+        async (input) => {
+          input.disabled = true;
+          try {
+            await Auth.setElevenAccess(p.id, input.checked);
+            p.elevenlabs_access = input.checked;
+            toast(p.email + (p.elevenlabs_access ? " ElevenLabs 승인됨" : " ElevenLabs 해제됨"));
           } catch (err) {
             input.checked = !input.checked;
             toast(err.message);
@@ -1787,9 +1810,18 @@ function fillSettingsForm() {
   fillTtsForm();
 }
 
+// ElevenLabs는 관리자가 특별 승인한 회원(과 관리자)에게만 노출·허용
+function elevenAllowed() {
+  return !Auth.enabled() || Auth.canUseEleven();
+}
+
 // ── 음성 읽기(TTS) 설정 폼 ──
 function fillTtsForm() {
   const t = settingsDraft.tts;
+  const elOpt = $("ttsProvider").querySelector('option[value="elevenlabs"]');
+  elOpt.hidden = !elevenAllowed();
+  elOpt.disabled = !elevenAllowed();
+  if (t.provider === "elevenlabs" && !elevenAllowed()) t.provider = "openai";
   $("ttsProvider").value = t.provider;
   $("ttsTarget").value = t.target;
   const p = t.provider;

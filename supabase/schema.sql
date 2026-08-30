@@ -23,6 +23,9 @@ create table if not exists public.profiles (
 -- 기존 설치본 업그레이드용 (없으면 컬럼 추가)
 alter table public.profiles
   add column if not exists shared_key_access boolean not null default false;
+-- ElevenLabs 음성 사용 특별 승인 (관리자만 부여, 별도 신청 없음)
+alter table public.profiles
+  add column if not exists elevenlabs_access boolean not null default false;
 
 alter table public.profiles enable row level security;
 
@@ -40,11 +43,12 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, display_name, approved, shared_key_access)
+  insert into public.profiles (id, email, display_name, approved, shared_key_access, elevenlabs_access)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'full_name', new.email),
+    new.email = 'linkedsugi@gmail.com',
     new.email = 'linkedsugi@gmail.com',
     new.email = 'linkedsugi@gmail.com'
   )
@@ -60,13 +64,13 @@ create trigger on_auth_user_created
 
 -- 관리자 계정은 항상 기본 승인 + 공용API 허용 상태로 보정
 -- (트리거 설치 전에 가입했거나 컬럼이 나중에 추가된 경우 대비)
-insert into public.profiles (id, email, display_name, approved, shared_key_access)
+insert into public.profiles (id, email, display_name, approved, shared_key_access, elevenlabs_access)
 select u.id, u.email,
-       coalesce(u.raw_user_meta_data ->> 'full_name', u.email), true, true
+       coalesce(u.raw_user_meta_data ->> 'full_name', u.email), true, true, true
 from auth.users u
 where u.email = 'linkedsugi@gmail.com'
 on conflict (id) do update
-  set approved = true, shared_key_access = true;
+  set approved = true, shared_key_access = true, elevenlabs_access = true;
 
 -- ── 공유 API 키 (승인된 회원만 읽기, 관리자만 쓰기) ──
 create table if not exists public.shared_keys (
@@ -83,13 +87,18 @@ alter table public.shared_keys add constraint shared_keys_provider_check
 
 alter table public.shared_keys enable row level security;
 
+-- 읽기: OpenAI·Gemini 키는 승인+공용API 회원, ElevenLabs 키는
+-- 관리자가 특별 승인(elevenlabs_access)한 회원만
 drop policy if exists "shared_keys approved read" on public.shared_keys;
 create policy "shared_keys approved read" on public.shared_keys
   for select using (
     public.is_admin()
     or exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.approved and p.shared_key_access
+      where p.id = auth.uid() and p.approved and (
+        (shared_keys.provider <> 'elevenlabs' and p.shared_key_access)
+        or (shared_keys.provider = 'elevenlabs' and p.elevenlabs_access)
+      )
     )
   );
 
