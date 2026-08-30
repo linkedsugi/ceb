@@ -222,7 +222,7 @@ const AiTranslator = (() => {
     // 음성 읽기(TTS). Gemini TTS는 위 gemini 키를 그대로 사용한다.
     tts: {
       provider: "gemini",     // gemini | elevenlabs
-      target: "ko",           // ko | en | both (절마다 영어→한국어)
+      target: "krv",          // krv(개역한글) | en(원어) | ai(AI 번역) | both(원어→한국어)
       gemini: { voice: "Kore", model: "gemini-2.5-flash-preview-tts" },
       elevenlabs: {
         key: "",
@@ -251,9 +251,10 @@ const AiTranslator = (() => {
     if (!merged.openai.models || !merged.openai.models.length) merged.openai.models = DEFAULTS.openai.models.slice();
     if (!merged.gemini.models || !merged.gemini.models.length) merged.gemini.models = DEFAULTS.gemini.models.slice();
     const t = s.tts || {};
+    const target = t.target === "ko" ? "krv" : t.target; // 구버전 값 마이그레이션
     merged.tts = {
       provider: t.provider === "elevenlabs" ? "elevenlabs" : "gemini",
-      target: ["ko", "en", "both"].indexOf(t.target) !== -1 ? t.target : "ko",
+      target: ["krv", "en", "ai", "both"].indexOf(target) !== -1 ? target : "krv",
       gemini: Object.assign({}, DEFAULTS.tts.gemini, t.gemini),
       elevenlabs: Object.assign({}, DEFAULTS.tts.elevenlabs, t.elevenlabs),
     };
@@ -641,21 +642,34 @@ const Tts = (() => {
     return pending[i];
   }
 
-  // 현재 화면(reader DOM)에서 절 텍스트를 모아 재생 목록을 만든다
-  function buildQueue(fromVerse) {
+  // 절 텍스트를 모아 재생 목록을 만든다.
+  // 개역한글은 화면 표시 여부와 무관하게 내장 데이터에서 직접 가져온다.
+  async function buildQueue(fromVerse) {
     const target = conf().target;
+    let krv = null;
+    if (target === "krv" || target === "both") {
+      try {
+        const d = await BibleData.load("krv", state.book);
+        krv = d.chapters[state.chapter - 1] || [];
+      } catch (e) { krv = []; }
+    }
     const items = [];
     document.querySelectorAll("#reader .verse").forEach((row) => {
       const verse = Number(row.dataset.verse);
       if (verse < fromVerse) return;
-      const en = row.querySelector(".verse-en");
-      const koNode = row.querySelector(".verse-ko") || row.querySelector(".verse-ai:not(.pending)");
-      const ko = koNode && koNode.textContent.trim();
-      if ((target === "en" || target === "both") && en && en.textContent.trim()) {
-        items.push({ verse, text: en.textContent.trim() });
+      const enNode = row.querySelector(".verse-en");
+      const en = enNode && enNode.textContent.trim();
+      const aiNode = row.querySelector(".verse-ai:not(.pending)");
+      const ai = aiNode && aiNode.textContent.trim();
+      const ko = krv ? String(krv[verse - 1] || "").trim() : "";
+      if ((target === "en" || target === "both") && en) {
+        items.push({ verse, text: en });
       }
-      if ((target === "ko" || target === "both") && ko) {
-        items.push({ verse, text: ko });
+      if ((target === "krv" || target === "both") && (ko || ai)) {
+        items.push({ verse, text: ko || ai });
+      }
+      if (target === "ai" && ai) {
+        items.push({ verse, text: ai });
       }
     });
     return items;
@@ -682,6 +696,18 @@ const Tts = (() => {
     $("ttsToggle").textContent = paused ? "▶" : "⏸";
   }
 
+  // iOS 등은 사용자 터치 없이 audio.play()를 막는다.
+  // 듣기 버튼을 누른 그 순간(터치 컨텍스트 안)에 무음을 한 번 재생해
+  // 이후의 프로그램적 재생을 허용시킨다.
+  let primed = false;
+  function primeAudio() {
+    if (primed) return;
+    try {
+      audio.src = URL.createObjectURL(pcmToWavBlob(new Uint8Array(96), 24000));
+      audio.play().then(() => { primed = true; }, () => {});
+    } catch (e) { /* 무시 */ }
+  }
+
   async function playIndex(i) {
     const my = session;
     idx = i;
@@ -689,6 +715,7 @@ const Tts = (() => {
     updateBar();
     highlight(queue[i].verse);
     let url;
+    if (!urlCache[i]) $("ttsInfo").textContent = "🔊 음성 준비 중…";
     try {
       url = await getUrl(i);
     } catch (err) {
@@ -698,25 +725,39 @@ const Tts = (() => {
       return;
     }
     if (my !== session) return;
+    updateBar();
     if (i + 1 < queue.length) getUrl(i + 1).catch(() => {}); // 다음 절 미리 합성
     audio.src = url;
-    try { await audio.play(); } catch (e) { /* 자동재생 차단 등 — 바에서 ▶로 재개 */ }
+    try {
+      await audio.play();
+    } catch (e) {
+      // 자동재생이 차단됨 — 일시정지 상태로 두고 ▶ 버튼으로 시작하게 안내
+      if (my !== session) return;
+      paused = true;
+      updateBar();
+      toast("▶ 버튼을 누르면 재생이 시작됩니다");
+    }
   }
 
   function playFrom(fromVerse) {
     stop();
-    queue = buildQueue(fromVerse || 1);
-    if (!queue.length) {
-      toast(conf().target === "ko"
-        ? "읽을 한국어 본문이 없습니다. 보기 모드를 확인해 주세요."
-        : "읽을 본문이 없습니다.");
-      return;
-    }
     session++;
-    active = true;
-    paused = false;
-    Auth.logUsage("tts", conf().provider);
-    playIndex(0);
+    const my = session;
+    primeAudio(); // 터치 컨텍스트 안에서 오디오 재생 권한 확보
+    buildQueue(fromVerse || 1).then((items) => {
+      if (my !== session) return;
+      queue = items;
+      if (!queue.length) {
+        toast(conf().target === "ai"
+          ? "AI 번역이 아직 표시되지 않았습니다. 한국어 소스를 'AI 번역'으로 두고 번역이 끝난 뒤 다시 시도해 주세요."
+          : "읽을 본문이 없습니다.");
+        return;
+      }
+      active = true;
+      paused = false;
+      Auth.logUsage("tts", conf().provider);
+      playIndex(0);
+    });
   }
 
   function toggle() {

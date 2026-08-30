@@ -402,7 +402,15 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   white-space: nowrap;
 }
 .listen-btn:hover { background: var(--accent-soft); }
-.verse.tts-playing { background: var(--accent-soft); border-radius: 8px; }
+.verse.tts-playing {
+  background: var(--accent-soft);
+  box-shadow: inset 4px 0 0 var(--accent);
+  border-radius: 8px;
+}
+.verse.tts-playing .verse-num { color: var(--accent); font-weight: 800; }
+.verse.tts-playing .verse-num::after {
+  content: "🔊"; display: block; font-size: 0.75em; line-height: 1.4;
+}
 .tts-bar {
   position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
   z-index: 45; display: flex; align-items: center; gap: 8px;
