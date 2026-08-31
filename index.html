@@ -37,6 +37,7 @@
     </select>
   </div>
   <div class="topbar-right">
+    <button id="planBtn" class="icon-btn" title="1년 1독 통독표" aria-label="1년 1독 통독표">📅</button>
     <button id="bookmarksBtn" class="icon-btn" title="저장된 구절" aria-label="저장된 구절">🔖</button>
     <button id="settingsBtn" class="icon-btn" title="설정" aria-label="설정">⚙️</button>
     <button id="searchBtn" class="icon-btn" title="검색" aria-label="검색">🔍</button>
@@ -84,6 +85,10 @@
           <li><b>🧭 빠른 탐색</b> — 상단의 책·장 버튼을 누르면 책/장/절을 한 화면에서
             선택합니다. 본문을 좌우로 밀면 이전/다음 장으로 이동하고,
             🔍 검색은 한국어·영어 모두 지원합니다.</li>
+          <li><b>📅 1년 1독 통독표</b> — 상단 📅 버튼에서 통독표를 시작하면
+            오늘 읽을 분량(구약·신약 병행 등)을 알려주고, 읽은 장을 자동으로
+            체크해 진행률·연속 일수·밀린 분량을 보여줍니다.
+            1년(365일)·6개월·3개월 기간을 고를 수 있습니다.</li>
           <li><b>🔊 음성 읽기</b> — 본문 상단의 듣기 버튼이나 절 메뉴의
             "이 절부터 듣기"로 영어·한국어 본문을 음성으로 들을 수 있습니다.
             Google Gemini TTS 또는 ElevenLabs 중 선택 (⚙️ 설정).</li>
@@ -256,6 +261,54 @@
     <button id="bookmarksClose" class="icon-btn" aria-label="닫기">✕</button>
   </div>
   <div id="bookmarksList" class="bookmarks-list"></div>
+</div>
+
+<div id="planPanel" class="chapter-picker plan-panel" hidden>
+  <div class="chapter-picker-head">
+    <span>📅 1년 1독 통독표</span>
+    <button id="planClose" class="icon-btn" aria-label="닫기">✕</button>
+  </div>
+  <div class="settings-body">
+    <div id="planMain" hidden>
+      <div id="planSummary" class="plan-summary"></div>
+      <div id="planToday" class="plan-today"></div>
+      <details id="planBehindBox" class="plan-fold" hidden>
+        <summary id="planBehindSummary">⏳ 밀린 분량</summary>
+        <div id="planBehind" class="plan-list"></div>
+      </details>
+      <details id="planScheduleBox" class="plan-fold">
+        <summary>📖 전체 일정 보기</summary>
+        <div id="planList" class="plan-list"></div>
+      </details>
+    </div>
+    <details id="planConfig" class="plan-fold plan-config">
+      <summary id="planConfigSummary">⚙️ 통독표 변경 · 진행 초기화</summary>
+      <div>
+        <p class="settings-note" id="planIntro" hidden>성경 전체를 정해진 기간에
+          나누어 읽는 통독표입니다. 오늘 읽을 분량을 알려주고, 읽은 장을 자동으로
+          체크해 진행률을 보여줍니다. 기록은 이 기기의 브라우저에 저장됩니다.</p>
+        <label class="settings-field">통독표 종류
+          <select id="planKind"></select>
+        </label>
+        <p class="settings-note" id="planKindDesc"></p>
+        <label class="settings-field">기간
+          <select id="planDays">
+            <option value="365">1년 (365일)</option>
+            <option value="180">6개월 (180일)</option>
+            <option value="90">3개월 (90일)</option>
+          </select>
+        </label>
+        <label class="settings-field">시작일
+          <input id="planStartDate" type="date">
+        </label>
+        <p class="settings-note" id="planPace"></p>
+        <div class="settings-actions">
+          <button id="planReset" class="pager-btn" hidden>진행 기록 초기화</button>
+          <button id="planApply" class="pager-btn primary">통독 시작하기</button>
+        </div>
+      </div>
+    </details>
+  </div>
 </div>
 
 <div id="adminPanel" class="chapter-picker admin-panel" hidden>

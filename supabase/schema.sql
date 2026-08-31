@@ -119,7 +119,7 @@ create table if not exists public.usage_stats (
 
 alter table public.usage_stats drop constraint if exists usage_stats_event_check;
 alter table public.usage_stats add constraint usage_stats_event_check
-  check (event in ('visit','chapter','ai','search','bookmark','note','tts'));
+  check (event in ('visit','chapter','ai','search','bookmark','note','tts','plan'));
 
 alter table public.usage_stats enable row level security;
 
@@ -135,7 +135,7 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if auth.uid() is null then return; end if;
-  if p_event not in ('visit','chapter','ai','search','bookmark','note','tts') then return; end if;
+  if p_event not in ('visit','chapter','ai','search','bookmark','note','tts','plan') then return; end if;
   insert into public.usage_stats (user_id, day, event, detail)
   values (auth.uid(), (now() at time zone 'utc')::date, p_event, coalesce(left(p_detail, 80), ''))
   on conflict (user_id, day, event, detail)

@@ -454,6 +454,75 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .tts-bar .pager-btn { padding: 6px 12px; }
 
+/* ── 1년 1독 통독표 ──────────────────── */
+.plan-chip {
+  font-size: 0.78rem; font-weight: 600; color: var(--text-sub);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 10px; margin-left: 8px; vertical-align: middle;
+  white-space: nowrap;
+}
+.plan-chip:hover { background: var(--accent-soft); color: var(--text); }
+.plan-chip.read { color: var(--accent); border-color: var(--accent); }
+.plan-summary { margin-bottom: 10px; }
+.plan-title { font-size: 0.95rem; font-weight: 800; color: var(--accent); }
+.plan-bar {
+  height: 9px; border-radius: 6px; background: var(--accent-soft);
+  overflow: hidden; margin: 8px 0 6px;
+}
+.plan-bar-fill { height: 100%; background: var(--accent); border-radius: 6px; }
+.plan-stat-line { font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.plan-stat-sub { font-size: 0.76rem; color: var(--text-sub); margin-top: 2px; }
+.plan-finished { margin-top: 6px; font-size: 0.85rem; font-weight: 700; color: var(--accent); }
+.plan-card {
+  border: 1.5px solid var(--accent); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 10px; background: var(--accent-soft);
+}
+.plan-card.done { border-color: var(--border); background: transparent; }
+.plan-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.plan-card-title { font-weight: 800; font-size: 0.9rem; }
+.plan-card-date { font-size: 0.78rem; color: var(--text-sub); }
+.plan-passages { display: flex; flex-direction: column; gap: 4px; }
+.plan-passage, .plan-row {
+  display: flex; align-items: center; gap: 8px;
+  border-radius: 8px; background: var(--panel);
+  border: 1px solid var(--border);
+}
+.plan-row { border-color: transparent; background: none; }
+.plan-row.today { background: var(--accent-soft); }
+.plan-row.done .plan-row-ref, .plan-passage.read .plan-ref {
+  color: var(--text-sub); text-decoration: line-through;
+}
+.plan-check { padding: 8px 6px 8px 9px; line-height: 0; flex: none; }
+.plan-check::before {
+  content: ""; display: inline-block; width: 17px; height: 17px;
+  border: 2px solid var(--border); border-radius: 5px; background: var(--panel);
+  font-size: 12px; line-height: 15px; text-align: center; font-weight: 800;
+}
+.plan-check:hover::before { border-color: var(--accent); }
+.plan-check.on::before {
+  content: "✓"; color: var(--panel);
+  background: var(--accent); border-color: var(--accent);
+}
+.plan-go {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px 7px 0; text-align: left; font-size: 0.85rem;
+}
+.plan-go:hover { color: var(--accent); }
+.plan-ref { font-weight: 700; }
+.plan-caret { margin-left: auto; font-size: 0.76rem; color: var(--text-sub); }
+.plan-row-day { font-weight: 700; min-width: 3.6em; font-variant-numeric: tabular-nums; }
+.plan-row-date { color: var(--text-sub); min-width: 2.8em; font-size: 0.78rem; }
+.plan-row-ref { flex: 1; min-width: 0; line-height: 1.35; }
+/* position: relative — 오늘 일차로 스크롤할 때 offsetTop 기준이 되도록 */
+.plan-list { max-height: 46vh; overflow-y: auto; position: relative; }
+.plan-fold { margin-bottom: 8px; }
+.plan-fold > summary {
+  cursor: pointer; font-size: 0.85rem; font-weight: 700; color: var(--accent);
+  padding: 4px 0;
+}
+.plan-fold[open] > summary { margin-bottom: 4px; }
+.plan-config { border-top: 1px solid var(--border); padding-top: 6px; }
+
 /* ── 토스트 ────────────────────────── */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
@@ -465,9 +534,9 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 @media (max-width: 640px) {
   .topbar { padding: 6px 8px; gap: 4px; }
-  .icon-btn { padding: 5px 7px; font-size: 0.88rem; }
-  .ref-btn { padding: 4px 8px; font-size: 0.98rem; }
-  .topbar-right { margin-left: auto; }
+  .icon-btn { padding: 5px 6px; font-size: 0.88rem; }
+  .ref-btn { padding: 4px 6px; font-size: 0.98rem; }
+  .topbar-right { margin-left: auto; gap: 2px; }
   /* 번역본 선택 줄은 두 번째 줄로 내려 전체 폭 사용 */
   .topbar-selects { order: 3; width: 100%; margin-left: 0; }
   .topbar-selects .sel { flex: 1; min-width: 0; font-size: 0.84rem; padding: 5px 4px; }
@@ -479,6 +548,18 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   .chapter-picker { top: 10px; max-height: 84vh; }
   .verse { grid-template-columns: 2em 1fr; padding: 8px 4px; }
   .main { padding: 14px 10px 60px; }
+  .plan-list { max-height: 52vh; }
+  .plan-row-day { min-width: 3.2em; }
+}
+
+/* 좁은 화면에서는 로그인 이메일 칩을 감춰 상단바를 두 줄로 유지한다
+   (로그인 여부는 ⎋ 로그아웃 버튼으로 알 수 있다) */
+@media (max-width: 440px) {
+  .user-chip { display: none; }
+}
+@media (max-width: 400px) {
+  .icon-btn { padding: 5px 5px; }
+  .topbar { gap: 3px; }
 }
 
 .font-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }

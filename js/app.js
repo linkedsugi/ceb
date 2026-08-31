@@ -1007,6 +1007,235 @@ function renderVerseNote(row, noteText) {
   if (noteText) body.appendChild(el("div", "verse-note", noteText));
 }
 
+/* ── 1년 1독 통독표 ─────────────────────── */
+// 통독표는 장 목록(흐름)을 기간으로 균등 분배해 만든다. 흐름을 여러 개 두면
+// 매일 각 흐름에서 조금씩 읽는 병행 통독표가 된다(예: 구약 + 신약).
+const ReadingPlan = (() => {
+  const LS = "bible-app-plan";
+
+  // 책 범위(from~to)의 모든 장을 [[책, 장], ...]으로 (skip에 든 책은 제외)
+  function chaptersOf(from, to, skip) {
+    const out = [];
+    for (let b = from; b <= to; b++) {
+      if (skip && skip.indexOf(b) !== -1) continue;
+      const n = BOOKS[b - 1][3];
+      for (let c = 1; c <= n; c++) out.push([b, c]);
+    }
+    return out;
+  }
+
+  const PLANS = {
+    otnt: {
+      label: "구약·신약 병행 (성경 전체)",
+      desc: "매일 구약 2~3장과 신약을 함께 읽습니다. 신약은 260장이라 " +
+        "며칠에 한 번은 구약만 읽는 날이 됩니다.",
+      streams: () => [chaptersOf(1, 39), chaptersOf(40, 66)],
+    },
+    seq: {
+      label: "전체 통독 (창세기 → 요한계시록)",
+      desc: "성경 전체를 처음부터 순서대로 읽습니다. 흐름을 따라가기 좋습니다.",
+      streams: () => [chaptersOf(1, 66)],
+    },
+    ntps: {
+      label: "신약·시편 (가볍게)",
+      desc: "신약 전체와 시편만 읽습니다. 하루 1~2장으로 부담이 적습니다.",
+      streams: () => [chaptersOf(40, 66), chaptersOf(19, 19)],
+    },
+  };
+
+  // 계획 전체 장 수
+  function planSize(key) {
+    const p = PLANS[key] || PLANS.otnt;
+    return p.streams().reduce((n, s) => n + s.length, 0);
+  }
+
+  const DEFAULTS = { plan: "", days: 365, start: "", read: {} };
+  let cfg = null;
+
+  function config() {
+    if (cfg) return cfg;
+    cfg = Object.assign({}, DEFAULTS);
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS));
+      if (saved) Object.assign(cfg, saved);
+    } catch (e) { /* 무시 */ }
+    if (!cfg.read || typeof cfg.read !== "object") cfg.read = {};
+    if (!PLANS[cfg.plan]) cfg.plan = cfg.plan ? "otnt" : "";
+    return cfg;
+  }
+
+  function persist() {
+    try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch (e) { /* 무시 */ }
+  }
+
+  function active() { return !!config().plan; }
+
+  // ── 일정 (계획·기간이 같으면 재사용) ──
+  let cache = null;
+  function schedule() {
+    const c = config();
+    if (!c.plan) return [];
+    const key = c.plan + ":" + c.days;
+    if (cache && cache.key === key) return cache.days;
+    const days = [];
+    for (let i = 0; i < c.days; i++) days.push([]);
+    const index = {};
+    // 각 흐름을 기간에 균등 분배 (반올림 경계라 첫날부터 각 흐름이 채워진다)
+    PLANS[c.plan].streams().forEach((list) => {
+      for (let i = 0; i < c.days; i++) {
+        const from = Math.round(i * list.length / c.days);
+        const to = Math.round((i + 1) * list.length / c.days);
+        for (let k = from; k < to; k++) {
+          days[i].push(list[k]);
+          index[list[k][0] + ":" + list[k][1]] = i;
+        }
+      }
+    });
+    cache = { key, days, index };
+    return days;
+  }
+
+  // 그 장이 속한 일차 (0-based, 없으면 -1)
+  function dayIndexOf(book, chapter) {
+    schedule();
+    const i = cache && cache.index[book + ":" + chapter];
+    return i === undefined ? -1 : i;
+  }
+
+  // ── 날짜 헬퍼 (로컬 자정 기준) ──
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function ymd(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function today() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function parseYmd(s) {
+    const p = String(s || "").split("-").map(Number);
+    if (p.length !== 3 || !p[0]) return today();
+    return new Date(p[0], p[1] - 1, p[2]);
+  }
+  function addDays(date, n) {
+    const d = new Date(date.getTime());
+    d.setDate(d.getDate() + n);
+    return d;
+  }
+  // i일차(1-based)의 날짜
+  function dateOf(i) { return addDays(parseYmd(config().start), i - 1); }
+  // 오늘이 몇 일차인지 (1-based, 기간을 넘어설 수 있음)
+  function todayIndex() {
+    return Math.round((today() - parseYmd(config().start)) / 86400000) + 1;
+  }
+
+  // ── 읽음 표시 ──
+  function isRead(book, chapter) { return !!config().read[book + ":" + chapter]; }
+
+  function mark(list, on) {
+    const read = config().read;
+    list.forEach((ch) => {
+      const k = ch[0] + ":" + ch[1];
+      if (on) read[k] = Date.now(); else delete read[k];
+    });
+    persist();
+  }
+
+  function dayDone(i) {
+    const day = schedule()[i];
+    return !!day && day.length > 0 && day.every((ch) => isRead(ch[0], ch[1]));
+  }
+
+  // 장 하나를 읽음/취소 — 그 표시로 하루 분량이 막 채워졌으면 completed
+  function setRead(book, chapter, on) {
+    const i = dayIndexOf(book, chapter);
+    const before = i >= 0 && dayDone(i);
+    mark([[book, chapter]], on);
+    return { day: i + 1, completed: i >= 0 && !before && dayDone(i) };
+  }
+
+  // 하루치(또는 한 구간) 전체를 읽음/취소
+  function setDayRead(i, on) {
+    const before = dayDone(i);
+    mark(schedule()[i] || [], on);
+    return { day: i + 1, completed: !before && dayDone(i) };
+  }
+
+  function setSpanRead(span, on) {
+    const list = [];
+    for (let c = span.from; c <= span.to; c++) list.push([span.book, c]);
+    const i = dayIndexOf(span.book, span.from);
+    const before = i >= 0 && dayDone(i);
+    mark(list, on);
+    return { day: i + 1, completed: i >= 0 && !before && dayDone(i) };
+  }
+
+  function spanRead(span) {
+    for (let c = span.from; c <= span.to; c++) if (!isRead(span.book, c)) return false;
+    return true;
+  }
+
+  // ── 표시용 구간 묶기: [[1,41],[1,42],[40,13]] → 창세기 41–42장, 마태복음 13장 ──
+  function spans(list) {
+    const out = [];
+    (list || []).forEach((ch) => {
+      const last = out[out.length - 1];
+      if (last && last.book === ch[0] && ch[1] === last.to + 1) last.to = ch[1];
+      else out.push({ book: ch[0], from: ch[1], to: ch[1] });
+    });
+    return out;
+  }
+  function spanLabel(s) {
+    return BOOKS[s.book - 1][1] + " " + s.from + (s.to > s.from ? "–" + s.to : "") + "장";
+  }
+  function dayLabel(i) { return spans(schedule()[i]).map(spanLabel).join(", "); }
+
+  // ── 진행 요약 ──
+  function stats() {
+    const days = schedule();
+    const total = days.length;
+    let doneDays = 0, totalCh = 0, readCh = 0;
+    const behind = [];
+    const todayIdx = todayIndex();
+    for (let i = 0; i < total; i++) {
+      const done = dayDone(i);
+      if (done) doneDays++;
+      else if (i + 1 < todayIdx) behind.push(i + 1);
+      totalCh += days[i].length;
+      days[i].forEach((ch) => { if (isRead(ch[0], ch[1])) readCh++; });
+    }
+    // 연속 일수: 오늘(마쳤다면)부터, 아니면 어제부터 거슬러 올라간다
+    const cur = Math.max(1, Math.min(total, todayIdx));
+    let streak = 0;
+    let i = dayDone(cur - 1) ? cur : cur - 1;
+    while (i >= 1 && dayDone(i - 1)) { streak++; i--; }
+    return {
+      total, doneDays, totalCh, readCh, behind, streak,
+      todayIdx, current: cur,
+      finished: doneDays >= total,
+      startDate: parseYmd(config().start),
+      endDate: dateOf(total),
+    };
+  }
+
+  function start(planKey, days, startYmd) {
+    const c = config();
+    c.plan = PLANS[planKey] ? planKey : "otnt";
+    c.days = Number(days) || 365;
+    c.start = startYmd || ymd(today());
+    cache = null;
+    persist();
+  }
+
+  function resetProgress() { config().read = {}; persist(); }
+  function stop() {
+    const c = config();
+    c.plan = "";
+    cache = null;
+    persist();
+  }
+
+  return {
+    PLANS, planSize, config, active, schedule, dayIndexOf, dayDone, dayLabel, spans, spanLabel,
+    spanRead, isRead, setRead, setDayRead, setSpanRead, stats, start, stop,
+    resetProgress, dateOf, todayIndex, ymd, today,
+  };
+})();
+
 /* ── 상태 ─────────────────────────────── */
 const state = {
   book: 43,       // 요한복음
@@ -1139,6 +1368,15 @@ async function renderChapter(highlightVerse) {
   listen.addEventListener("click", () => Tts.playFrom(1));
   heading.appendChild(listen);
   reader.appendChild(heading);
+  updatePlanChip();
+  // 통독표: 한 장에 잠시라도 머물렀다면 읽은 것으로 본다
+  if (ReadingPlan.active() && !ReadingPlan.isRead(state.book, state.chapter)) {
+    setTimeout(() => {
+      if (token !== renderToken) return;
+      notePlanProgress(ReadingPlan.setRead(state.book, state.chapter, true));
+      updatePlanChip();
+    }, 8000);
+  }
 
   if (en.title && state.mode !== "ko") {
     reader.appendChild(el("div", "psalm-title", en.title));
@@ -1368,6 +1606,7 @@ function closePanels() {
   $("adminPanel").hidden = true;
   $("versePanel").hidden = true;
   $("bookmarksPanel").hidden = true;
+  $("planPanel").hidden = true;
   $("overlay").hidden = true;
 }
 
@@ -1462,6 +1701,225 @@ function openBookmarksPanel() {
   $("bookmarksPanel").hidden = false;
 }
 
+/* ── 1년 1독 통독표 패널 ─────────────────── */
+function fmtPlanDate(d) { return d.getFullYear() + "." + (d.getMonth() + 1) + "." + d.getDate(); }
+function fmtPlanMd(d) { return (d.getMonth() + 1) + "/" + d.getDate(); }
+
+// 하루 분량이 막 채워졌으면 알린다
+function notePlanProgress(res) {
+  if (res && res.completed) {
+    toast("🎉 " + res.day + "일차 통독 분량을 마쳤습니다");
+    Auth.logUsage("plan");
+  }
+}
+
+// 읽음 체크 상자 (테마에 맞춰 CSS로 그린다)
+function planCheckBtn(on, title, onClick) {
+  const btn = el("button", "plan-check" + (on ? " on" : ""));
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+// 오늘 카드의 구간 한 줄 (읽음 체크 + 본문으로 이동)
+function planPassageRow(span) {
+  const read = ReadingPlan.spanRead(span);
+  const row = el("div", "plan-passage" + (read ? " read" : ""));
+  const check = planCheckBtn(read, read ? "읽음 해제" : "읽음 표시", () => {
+    notePlanProgress(ReadingPlan.setSpanRead(span, !read));
+    renderPlanPanel();
+  });
+  const go = el("button", "plan-go");
+  go.appendChild(el("span", "plan-ref", ReadingPlan.spanLabel(span)));
+  go.appendChild(el("span", "plan-caret", "읽기 ›"));
+  go.addEventListener("click", () => {
+    closePanels();
+    goTo(span.book, span.from);
+  });
+  row.appendChild(check);
+  row.appendChild(go);
+  return row;
+}
+
+// 일정 목록의 하루 한 줄
+function planDayRow(i, currentIdx) {
+  const done = ReadingPlan.dayDone(i);
+  const row = el("div", "plan-row" + (done ? " done" : "") +
+    (i + 1 === currentIdx ? " today" : ""));
+  const check = planCheckBtn(done, done ? "읽음 해제" : "이 날 분량 읽음", () => {
+    notePlanProgress(ReadingPlan.setDayRead(i, !done));
+    renderPlanPanel();
+  });
+  const go = el("button", "plan-go");
+  go.appendChild(el("span", "plan-row-day", (i + 1) + "일차"));
+  go.appendChild(el("span", "plan-row-date", fmtPlanMd(ReadingPlan.dateOf(i + 1))));
+  go.appendChild(el("span", "plan-row-ref", ReadingPlan.dayLabel(i)));
+  go.addEventListener("click", () => {
+    const first = (ReadingPlan.schedule()[i] || [])[0];
+    if (!first) return;
+    closePanels();
+    goTo(first[0], first[1]);
+  });
+  row.appendChild(check);
+  row.appendChild(go);
+  return row;
+}
+
+function renderPlanSummary(s) {
+  const cfg = ReadingPlan.config();
+  const box = $("planSummary");
+  box.innerHTML = "";
+  box.appendChild(el("div", "plan-title",
+    ReadingPlan.PLANS[cfg.plan].label + " · " + s.total + "일"));
+  const pct = s.total ? Math.round(s.doneDays / s.total * 100) : 0;
+  const bar = el("div", "plan-bar");
+  const fill = el("div", "plan-bar-fill");
+  fill.style.width = pct + "%";
+  bar.appendChild(fill);
+  box.appendChild(bar);
+  box.appendChild(el("div", "plan-stat-line",
+    s.doneDays + "/" + s.total + "일 완료 (" + pct + "%) · " +
+    s.readCh.toLocaleString() + "/" + s.totalCh.toLocaleString() + "장" +
+    (s.streak ? " · 🔥 연속 " + s.streak + "일" : "")));
+  box.appendChild(el("div", "plan-stat-sub",
+    fmtPlanDate(s.startDate) + " 시작 · " + fmtPlanDate(s.endDate) + " 마침 예정"));
+  if (s.finished) box.appendChild(el("div", "plan-finished", "🎉 통독을 마쳤습니다!"));
+}
+
+function renderPlanToday(s) {
+  const box = $("planToday");
+  box.innerHTML = "";
+  const i = s.current - 1;
+  const day = ReadingPlan.schedule()[i] || [];
+  const done = ReadingPlan.dayDone(i);
+  const card = el("div", "plan-card" + (done ? " done" : ""));
+  const head = el("div", "plan-card-head");
+  let title = "오늘 · " + s.current + "일차";
+  if (s.todayIdx < 1) title = "시작 전 · 1일차 분량";
+  else if (s.todayIdx > s.total) title = "기간 종료 · " + s.total + "일차";
+  head.appendChild(el("span", "plan-card-title", title));
+  head.appendChild(el("span", "plan-card-date", fmtPlanMd(ReadingPlan.dateOf(s.current))));
+  card.appendChild(head);
+  const list = el("div", "plan-passages");
+  ReadingPlan.spans(day).forEach((sp) => list.appendChild(planPassageRow(sp)));
+  card.appendChild(list);
+  const actions = el("div", "settings-actions");
+  const btn = el("button", "pager-btn" + (done ? "" : " primary"),
+    done ? "완료 취소" : "이 분량 모두 읽음");
+  btn.addEventListener("click", () => {
+    notePlanProgress(ReadingPlan.setDayRead(i, !done));
+    renderPlanPanel();
+  });
+  actions.appendChild(btn);
+  card.appendChild(actions);
+  box.appendChild(card);
+}
+
+function renderPlanBehind(s) {
+  const fold = $("planBehindBox");
+  fold.hidden = !s.behind.length;
+  if (!s.behind.length) return;
+  $("planBehindSummary").textContent = "⏳ 밀린 분량 " + s.behind.length + "일";
+  const box = $("planBehind");
+  box.innerHTML = "";
+  s.behind.slice(0, 30).forEach((d) => box.appendChild(planDayRow(d - 1, s.current)));
+  if (s.behind.length > 30) {
+    box.appendChild(el("div", "settings-note", "밀린 " + s.behind.length + "일 중 30일까지 표시"));
+  }
+}
+
+function renderPlanList(s) {
+  const box = $("planList");
+  box.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < s.total; i++) frag.appendChild(planDayRow(i, s.current));
+  box.appendChild(frag);
+  const cur = box.children[s.current - 1];
+  if (cur) box.scrollTop = Math.max(0, cur.offsetTop - box.clientHeight / 2);
+}
+
+function renderPlanPanel() {
+  const on = ReadingPlan.active();
+  $("planMain").hidden = !on;
+  $("planIntro").hidden = on;
+  $("planReset").hidden = !on;
+  $("planApply").textContent = on ? "변경 적용" : "통독 시작하기";
+  $("planConfigSummary").textContent = on
+    ? "⚙️ 통독표 변경 · 진행 초기화" : "📅 통독표를 고르고 시작하기";
+  if (!on) {
+    $("planConfig").open = true;
+    return;
+  }
+  const s = ReadingPlan.stats();
+  renderPlanSummary(s);
+  renderPlanToday(s);
+  renderPlanBehind(s);
+  if ($("planScheduleBox").open) renderPlanList(s);
+}
+
+function updatePlanFormNote() {
+  const key = $("planKind").value;
+  const kind = ReadingPlan.PLANS[key];
+  const days = Number($("planDays").value) || 365;
+  const total = ReadingPlan.planSize(key);
+  $("planKindDesc").textContent = kind ? kind.desc : "";
+  $("planPace").textContent = "모두 " + total.toLocaleString() + "장 · 하루 평균 약 " +
+    (total / days).toFixed(1) + "장";
+}
+
+function fillPlanForm() {
+  const cfg = ReadingPlan.config();
+  const kind = $("planKind");
+  if (!kind.options.length) {
+    Object.keys(ReadingPlan.PLANS).forEach((k) => {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = ReadingPlan.PLANS[k].label;
+      kind.appendChild(opt);
+    });
+  }
+  kind.value = cfg.plan || "otnt";
+  $("planDays").value = String(cfg.days || 365);
+  $("planStartDate").value = cfg.start || ReadingPlan.ymd(ReadingPlan.today());
+  updatePlanFormNote();
+}
+
+function openPlanPanel() {
+  closePanels();
+  fillPlanForm();
+  renderPlanPanel();
+  $("overlay").hidden = false;
+  $("planPanel").hidden = false;
+}
+
+// 본문 제목 옆의 통독 표시 (읽음 여부 토글)
+function updatePlanChip() {
+  const heading = document.querySelector("#reader .chapter-heading");
+  if (!heading) return;
+  let chip = heading.querySelector(".plan-chip");
+  if (!ReadingPlan.active()) {
+    if (chip) chip.remove();
+    return;
+  }
+  if (!chip) {
+    chip = el("button", "plan-chip");
+    chip.addEventListener("click", () => {
+      const next = !ReadingPlan.isRead(state.book, state.chapter);
+      notePlanProgress(ReadingPlan.setRead(state.book, state.chapter, next));
+      updatePlanChip();
+      if (!$("planPanel").hidden) renderPlanPanel();
+    });
+    heading.appendChild(chip);
+  }
+  const read = ReadingPlan.isRead(state.book, state.chapter);
+  const day = ReadingPlan.dayIndexOf(state.book, state.chapter);
+  chip.classList.toggle("read", read);
+  chip.textContent = read ? "✅ 통독 읽음" : "📅 읽음 표시";
+  chip.title = (day >= 0 ? "통독표 " + (day + 1) + "일차 분량" : "통독표") +
+    " — 눌러서 읽음 표시를 바꿉니다";
+}
+
 /* ── 로그인 / 회원 관리 ─────────────────── */
 function updateAuthUi() {
   if (!Auth.enabled()) return;
@@ -1524,11 +1982,12 @@ function renderDailyStats() {
   const byDay = {};
   adminData.usage.forEach((r) => {
     const d = byDay[r.day] ||
-      (byDay[r.day] = { users: new Set(), chapter: 0, ai: 0, tts: 0, search: 0, rec: 0 });
+      (byDay[r.day] = { users: new Set(), chapter: 0, ai: 0, tts: 0, plan: 0, search: 0, rec: 0 });
     d.users.add(r.user_id);
     if (r.event === "chapter") d.chapter += r.count;
     else if (r.event === "ai") d.ai += r.count;
     else if (r.event === "tts") d.tts += r.count;
+    else if (r.event === "plan") d.plan += r.count;
     else if (r.event === "search") d.search += r.count;
     else if (r.event === "bookmark" || r.event === "note") d.rec += r.count;
   });
@@ -1539,13 +1998,13 @@ function renderDailyStats() {
   }
   const table = el("table", "stat-table");
   const head = el("tr");
-  ["날짜", "활성", "읽기", "AI", "듣기", "검색", "기록"].forEach((h) =>
+  ["날짜", "활성", "읽기", "AI", "듣기", "통독", "검색", "기록"].forEach((h) =>
     head.appendChild(el("th", "", h)));
   table.appendChild(head);
   daysList.slice(0, 31).forEach((day) => {
     const d = byDay[day];
     const tr = el("tr");
-    [day.slice(5), d.users.size, d.chapter, d.ai, d.tts, d.search, d.rec]
+    [day.slice(5), d.users.size, d.chapter, d.ai, d.tts, d.plan, d.search, d.rec]
       .forEach((v, i) => tr.appendChild(el("td", i === 0 ? "stat-day" : "", String(v))));
     table.appendChild(tr);
   });
@@ -1593,23 +2052,25 @@ function buildMemberDetail(userId) {
   // 일자별 표
   const byDay = {};
   rows.forEach((r) => {
-    const d = byDay[r.day] || (byDay[r.day] = { visit: 0, chapter: 0, ai: 0, tts: 0, search: 0, rec: 0 });
+    const d = byDay[r.day] ||
+      (byDay[r.day] = { visit: 0, chapter: 0, ai: 0, tts: 0, plan: 0, search: 0, rec: 0 });
     if (r.event === "visit") d.visit += r.count;
     else if (r.event === "chapter") d.chapter += r.count;
     else if (r.event === "ai") d.ai += r.count;
     else if (r.event === "tts") d.tts += r.count;
+    else if (r.event === "plan") d.plan += r.count;
     else if (r.event === "search") d.search += r.count;
     else if (r.event === "bookmark" || r.event === "note") d.rec += r.count;
   });
   const table = el("table", "stat-table");
   const head = el("tr");
-  ["날짜", "접속", "읽기", "AI", "듣기", "검색", "기록"].forEach((h) =>
+  ["날짜", "접속", "읽기", "AI", "듣기", "통독", "검색", "기록"].forEach((h) =>
     head.appendChild(el("th", "", h)));
   table.appendChild(head);
   Object.keys(byDay).sort().reverse().slice(0, 31).forEach((day) => {
     const d = byDay[day];
     const tr = el("tr");
-    [day.slice(5), d.visit, d.chapter, d.ai, d.tts, d.search, d.rec]
+    [day.slice(5), d.visit, d.chapter, d.ai, d.tts, d.plan, d.search, d.rec]
       .forEach((v, i) => tr.appendChild(el("td", i === 0 ? "stat-day" : "", String(v))));
     table.appendChild(tr);
   });
@@ -1680,6 +2141,7 @@ function memberUsageText(u) {
   if (n("ai")) parts.push("AI 번역 " + n("ai") + "회");
   if (n("search")) parts.push("검색 " + n("search"));
   if (n("tts")) parts.push("듣기 " + n("tts") + "회");
+  if (n("plan")) parts.push("통독 " + n("plan") + "일");
   if (n("bookmark") + n("note")) parts.push("책갈피·노트 " + (n("bookmark") + n("note")));
   return "최근 활동 " + u.last + " · 30일간 " + parts.join(" · ");
 }
@@ -1700,8 +2162,9 @@ function renderMembers() {
     const tv = (ev) => totals.ev[ev] || 0;
     box.appendChild(el("div", "admin-summary",
       days + "일간: 활성 " + totals.users.size + "명 · 읽기 " + tv("chapter") +
-      "장 · AI 번역 " + tv("ai") + "회 · 듣기 " + tv("tts") + "회 · 검색 " +
-      tv("search") + " · 책갈피·노트 " + (tv("bookmark") + tv("note"))));
+      "장 · AI 번역 " + tv("ai") + "회 · 듣기 " + tv("tts") + "회 · 통독 " +
+      tv("plan") + "일 · 검색 " + tv("search") +
+      " · 책갈피·노트 " + (tv("bookmark") + tv("note"))));
   }
   if (usageError) {
     box.appendChild(el("div", "settings-note",
@@ -2229,6 +2692,30 @@ function init() {
 
   $("bookmarksBtn").addEventListener("click", openBookmarksPanel);
   $("bookmarksClose").addEventListener("click", closePanels);
+
+  $("planBtn").addEventListener("click", openPlanPanel);
+  $("planClose").addEventListener("click", closePanels);
+  $("planKind").addEventListener("change", updatePlanFormNote);
+  $("planDays").addEventListener("change", updatePlanFormNote);
+  $("planScheduleBox").addEventListener("toggle", () => {
+    if ($("planScheduleBox").open && ReadingPlan.active()) renderPlanList(ReadingPlan.stats());
+  });
+  $("planApply").addEventListener("click", () => {
+    const wasActive = ReadingPlan.active();
+    ReadingPlan.start($("planKind").value, Number($("planDays").value),
+      $("planStartDate").value);
+    $("planConfig").open = false;
+    renderPlanPanel();
+    updatePlanChip();
+    toast(wasActive ? "통독표를 변경했습니다" : "통독을 시작합니다 🎉");
+  });
+  $("planReset").addEventListener("click", () => {
+    if (!confirm("통독 진행 기록(읽음 표시)을 모두 지울까요?")) return;
+    ReadingPlan.resetProgress();
+    renderPlanPanel();
+    updatePlanChip();
+    toast("진행 기록을 초기화했습니다");
+  });
   $("versePanelClose").addEventListener("click", closePanels);
   $("vmBookmark").addEventListener("click", () => {
     const ann = Annotations.get(verseCtx.book, verseCtx.chapter, verseCtx.verse);
