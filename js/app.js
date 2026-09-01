@@ -746,6 +746,7 @@ const Tts = (() => {
   // 여러 절을 한 항목으로 묶어 한 번에 낭독한다 — 절 사이 끊김이 크게 줄어든다.
   const CHUNK_CHARS = 420;
   const CHUNK_MAX_VERSES = 5;
+  // parts(절별 글자 수)는 재생 중 "지금 읽는 절"을 추정하는 데 쓴다.
   function groupItems(items) {
     const out = [];
     items.forEach((it) => {
@@ -755,8 +756,11 @@ const Tts = (() => {
         last.text += " " + it.text;
         last.v2 = it.verse;
         last.count++;
+        last.parts.push({ verse: it.verse, len: it.text.length + 1 });
+        last.total += it.text.length + 1;
       } else {
-        out.push({ v1: it.verse, v2: it.verse, text: it.text, count: 1 });
+        out.push({ v1: it.verse, v2: it.verse, text: it.text, count: 1,
+          parts: [{ verse: it.verse, len: it.text.length }], total: it.text.length });
       }
     });
     return out;
@@ -799,16 +803,55 @@ const Tts = (() => {
     return groupItems(items);
   }
 
+  // ── 읽는 위치 따라가기 ──────────────────
+  let currentVerse = 0;
+  let userScrollAt = 0; // 사용자가 직접 스크롤한 시각 (잠시 자동 스크롤을 멈춘다)
+  const FOLLOW_PAUSE = 6000;
+
+  ["wheel", "touchmove"].forEach((ev) => {
+    window.addEventListener(ev, () => { userScrollAt = Date.now(); }, { passive: true });
+  });
+
+  // 읽기 좋은 위치(화면 중앙 부근)를 벗어났을 때만 부드럽게 이동
+  function followScroll(row) {
+    if (Date.now() - userScrollAt < FOLLOW_PAUSE) return;
+    const r = row.getBoundingClientRect();
+    if (r.top >= innerHeight * 0.18 && r.bottom <= innerHeight * 0.72) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function markCurrent(verse) {
+    currentVerse = verse;
+    document.querySelectorAll("#reader .verse.tts-current")
+      .forEach((n) => n.classList.remove("tts-current"));
+    if (!verse) return;
+    const row = document.querySelector('#reader .verse[data-verse="' + verse + '"]');
+    if (!row) return;
+    row.classList.add("tts-current");
+    followScroll(row);
+  }
+
+  // 묶어 읽는 중 재생 위치(비율)로 지금 읽는 절을 추정한다
+  function verseAtRatio(item, ratio) {
+    if (!item.parts || item.parts.length < 2 || !item.total) return item.v1;
+    const at = ratio * item.total;
+    let acc = 0;
+    for (let i = 0; i < item.parts.length; i++) {
+      acc += item.parts[i].len;
+      if (at <= acc) return item.parts[i].verse;
+    }
+    return item.v2;
+  }
+
   function highlight(item) {
     document.querySelectorAll("#reader .verse.tts-playing")
       .forEach((n) => n.classList.remove("tts-playing"));
-    if (!item) return;
+    if (!item) { markCurrent(0); return; }
     for (let v = item.v1; v <= item.v2; v++) {
       const row = document.querySelector('#reader .verse[data-verse="' + v + '"]');
       if (row) row.classList.add("tts-playing");
     }
-    const first = document.querySelector('#reader .verse[data-verse="' + item.v1 + '"]');
-    if (first) first.scrollIntoView({ block: "center", behavior: "smooth" });
+    markCurrent(item.v1);
   }
 
   function updateBar() {
@@ -816,9 +859,11 @@ const Tts = (() => {
     $("ttsBar").hidden = false;
     const item = queue[idx];
     const meta = bookMeta(state.book);
-    const label = item ? (item.v1 === item.v2 ? item.v1 : item.v1 + "-" + item.v2) : "";
-    $("ttsInfo").textContent = "🔊 " + meta[1] + " " + state.chapter + ":" +
-      label + " (" + (idx + 1) + "/" + queue.length + ")";
+    const at = item ? (currentVerse || item.v1) : "";
+    // 묶어 읽는 중이면 현재 절과 함께 묶음 범위도 알려준다
+    const span = item && item.v1 !== item.v2 ? " · " + item.v1 + "–" + item.v2 + "절" : "";
+    $("ttsInfo").textContent = "🔊 " + meta[1] + " " + state.chapter + ":" + at + span +
+      " (" + (idx + 1) + "/" + queue.length + ")";
     $("ttsToggle").hidden = false;
     $("ttsToggle").textContent = paused ? "▶" : "⏸";
   }
@@ -928,6 +973,18 @@ const Tts = (() => {
 
   audio.addEventListener("ended", () => {
     if (active && !paused) playIndex(idx + 1);
+  });
+
+  // 묶어 읽는 동안 재생 진행에 맞춰 현재 절 표시를 옮기고 따라 스크롤한다
+  audio.addEventListener("timeupdate", () => {
+    if (!active || paused) return;
+    const item = queue[idx];
+    if (!item || !audio.duration || !isFinite(audio.duration)) return;
+    const v = verseAtRatio(item, audio.currentTime / audio.duration);
+    if (v !== currentVerse) {
+      markCurrent(v);
+      updateBar();
+    }
   });
 
   const OPENAI_VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral",
