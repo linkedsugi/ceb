@@ -60,6 +60,23 @@ Supabase를 연결하면 구글 로그인, 관리자(linkedsugi@gmail.com)의 �
 - 또는 간단한 정적 서버로 실행: `python3 -m http.server 8000` → http://localhost:8000
 - GitHub Pages에 그대로 올려도 동작합니다 (저장소 설정 → Pages → 브랜치 선택).
 
+### Railway 배포
+
+빌드가 필요 없는 정적 사이트지만, Railway에서는 `server.js`(의존성 없는 Node 정적 서버)가
+`index.html`의 `__BUILD__`를 배포 커밋 해시로 바꿔 서빙합니다.
+
+1. Railway → New Project → **Deploy from GitHub repo** → `linkedsugi/ceb` 선택
+2. 설정은 `railway.json`이 자동 적용됩니다 — 시작 명령 `node server.js`,
+   헬스체크 `/api/health`, 실패 시에만 재시작
+3. 환경변수는 필요 없습니다 (`PORT`는 Railway가 주입, `RAILWAY_GIT_COMMIT_SHA`로 빌드 표시)
+4. 배포 후 확인: `https://<도메인>/api/health` → `{"status":"ok","build":"<커밋7자리>"}`
+5. 커스텀 도메인은 Railway에서 추가한 뒤 DNS CNAME을 연결합니다
+
+로컬 확인: `node server.js` → http://localhost:8080
+
+> GitHub Pages 배포(`.github/workflows/pages.yml`)는 그대로 둡니다. 두 곳이 같은 코드를
+> 서빙하므로, Railway로 옮긴 뒤 Pages를 끌지는 도메인을 정한 다음 결정하면 됩니다.
+
 ## 기능
 
 - **영·한 대조 보기** — 절마다 영어 본문 아래에 한국어 번역 표시 (영어만 / 한국어만 모드 지원)

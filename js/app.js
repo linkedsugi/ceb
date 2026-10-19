@@ -224,7 +224,8 @@ const AiTranslator = (() => {
       provider: "openai",     // openai | gemini | elevenlabs
       target: "krv",          // krv(개역한글) | en(원어) | ai(AI 번역) | both(원어→한국어)
       openai: { voice: "marin", model: "gpt-4o-mini-tts" },
-      gemini: { voice: "Kore", model: "gemini-2.5-flash-preview-tts" },
+      // model이 비어 있으면 관리자가 정한 공통 모델(없으면 앱 기본 최신 모델)을 쓴다
+      gemini: { voice: "Kore", model: "" },
       elevenlabs: {
         key: "",
         useShared: false,
@@ -261,6 +262,10 @@ const AiTranslator = (() => {
       gemini: Object.assign({}, DEFAULTS.tts.gemini, t.gemini),
       elevenlabs: Object.assign({}, DEFAULTS.tts.elevenlabs, t.elevenlabs),
     };
+    // 예전 기본값이 그대로 저장돼 있으면 비워서 최신·관리자 지정 모델을 따르게 한다
+    if (/^gemini-2\.5-|^gemini-3\.1-/.test(merged.tts.gemini.model || "")) {
+      merged.tts.gemini.model = "";
+    }
     return merged;
   }
 
@@ -589,54 +594,104 @@ const Tts = (() => {
     "다음 성경 본문을 차분하고 경건한 목소리로, 서두르지 않고 문장이 자연스럽게 " +
     "이어지도록 낭독해줘:\n\n";
 
-  // 모델명이 바뀌었을 수 있으므로 404면 알려진 TTS 모델들로 재시도한다
-  const GEMINI_TTS_FALLBACKS = ["gemini-2.5-flash-preview-tts",
-    "gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts"];
+  // Gemini 3.8 계열 TTS는 본문을 "있는 그대로" 읽는다 — 낭독 지시는 본문이 아니라
+  // part.speech_metadata.style 로 넣어야 한다(본문에 쓰면 지시문까지 소리내어 읽는다).
+  // 구형(2.5·3.1)은 style 을 모르므로 기존처럼 프롬프트 접두어를 쓴다.
+  const GEMINI_NARRATE_STYLE =
+    "calm, warm and reverent Korean scripture narration, unhurried and flowing";
+  function usesSpeechStyle(model) { return /gemini-3\.[89]|gemini-[4-9]/.test(model || ""); }
+
+  // 모델명이 바뀌었을 수 있으므로 404면 알려진 TTS 모델들로 재시도한다 (최신 우선)
+  const GEMINI_TTS_FALLBACKS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts",
+    "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"];
   let geminiModelOk = null; // 이번 세션에서 성공한 모델
+
+  // 관리자가 정해 둔 공통 기본 모델 (Supabase app_settings) — 회원 설정이 비어 있을 때 쓴다
+  let adminGeminiModel = "";
+  function setAdminGeminiModel(m) { adminGeminiModel = m || ""; }
+  function geminiModel() {
+    const t = conf().gemini;
+    return (t.model || "").trim() || adminGeminiModel || GEMINI_TTS_FALLBACKS[0];
+  }
+
+  function geminiBody(model, text, voice, withStyle) {
+    const part = { text: withStyle ? text : GEMINI_NARRATE_PREFIX + text };
+    if (withStyle) part.speech_metadata = { style: GEMINI_NARRATE_STYLE };
+    return {
+      contents: [{ parts: [part] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+      },
+    };
+  }
 
   async function synthGemini(text) {
     const apiKey = await ttsKey("gemini");
     const t = conf().gemini;
+    // 지정한 모델이 항상 먼저다. geminiModelOk(이번 세션에서 성공한 모델)는
+    // 지정 모델이 실패할 때만 쓰는 차선책이라 뒤에 둔다 — 설정을 바꾸면 바로 반영된다.
     const candidates = [];
-    [geminiModelOk, t.model].concat(GEMINI_TTS_FALLBACKS).forEach((m) => {
+    [geminiModel(), geminiModelOk].concat(GEMINI_TTS_FALLBACKS).forEach((m) => {
       if (m && candidates.indexOf(m) === -1) candidates.push(m);
     });
     let lastErr = null;
     for (let c = 0; c < candidates.length; c++) {
       const model = candidates[c];
-      const res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(model) + ":generateContent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: GEMINI_NARRATE_PREFIX + text }] }],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: t.voice } } },
-          },
-        }),
-      });
-      if (!res.ok) {
-        let msg = "";
-        try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
-        lastErr = new Error("Gemini 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
-        if (res.status === 404 || res.status === 400) continue; // 모델 문제 — 다음 후보 시도
-        throw lastErr;
+      // style 을 지원하지 않는 서버라면 한 번은 style 없이 다시 시도한다
+      const modes = usesSpeechStyle(model) ? [true, false] : [false];
+      for (let m = 0; m < modes.length; m++) {
+        const res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(model) + ":generateContent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify(geminiBody(model, text, t.voice, modes[m])),
+        });
+        if (!res.ok) {
+          let msg = "";
+          try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+          lastErr = new Error("Gemini 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+          if (res.status === 400 && m + 1 < modes.length) continue; // style 미지원 — 빼고 재시도
+          if (res.status === 404 || res.status === 400) break;      // 모델 문제 — 다음 후보로
+          throw lastErr;
+        }
+        const j = await res.json();
+        const parts = (j.candidates && j.candidates[0] && j.candidates[0].content &&
+          j.candidates[0].content.parts) || [];
+        const part = parts.find((p) => p.inlineData && p.inlineData.data);
+        if (!part) { lastErr = new Error("Gemini 음성 응답이 비어 있습니다."); break; }
+        geminiModelOk = model;
+        const mime = part.inlineData.mimeType || "";
+        const bytes = b64ToBytes(part.inlineData.data);
+        if (/wav|mpeg|mp3|ogg/.test(mime)) {
+          return URL.createObjectURL(new Blob([bytes], { type: mime }));
+        }
+        const rate = Number((mime.match(/rate=(\d+)/) || [])[1]) || 24000; // audio/L16;rate=24000
+        return URL.createObjectURL(pcmToWavBlob(bytes, rate));
       }
-      const j = await res.json();
-      const parts = (j.candidates && j.candidates[0] && j.candidates[0].content &&
-        j.candidates[0].content.parts) || [];
-      const part = parts.find((p) => p.inlineData && p.inlineData.data);
-      if (!part) { lastErr = new Error("Gemini 음성 응답이 비어 있습니다."); continue; }
-      geminiModelOk = model;
-      const mime = part.inlineData.mimeType || "";
-      const bytes = b64ToBytes(part.inlineData.data);
-      if (/wav|mpeg|mp3|ogg/.test(mime)) {
-        return URL.createObjectURL(new Blob([bytes], { type: mime }));
-      }
-      const rate = Number((mime.match(/rate=(\d+)/) || [])[1]) || 24000; // audio/L16;rate=24000
-      return URL.createObjectURL(pcmToWavBlob(bytes, rate));
     }
     throw lastErr || new Error("Gemini 음성 합성에 실패했습니다.");
+  }
+
+  // Gemini 모델 목록에서 낭독(generateContent)에 쓸 수 있는 TTS 모델만 추린다.
+  // Live 계열은 실시간 스트리밍(bidiGenerateContent) 전용이라 제외한다.
+  async function listGeminiTtsModels(apiKey) {
+    const res = await fetch(GEMINI_BASE + "/models?pageSize=200", {
+      headers: { "x-goog-api-key": apiKey },
+    });
+    if (!res.ok) {
+      let msg = "";
+      try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
+      throw new Error("모델 목록을 불러오지 못했습니다 (" + res.status + (msg ? ": " + msg : "") + ")");
+    }
+    const j = await res.json();
+    return (j.models || [])
+      .map((m) => ({
+        id: String(m.name || "").replace(/^models\//, ""),
+        label: m.displayName || "",
+        methods: m.supportedGenerationMethods || [],
+      }))
+      .filter((m) => /tts/.test(m.id) && m.methods.indexOf("generateContent") !== -1)
+      .sort((a, b) => b.id.localeCompare(a.id, "en", { numeric: true }));
   }
 
   async function synthOpenai(text) {
@@ -990,8 +1045,9 @@ const Tts = (() => {
   const OPENAI_VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral",
     "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"];
 
-  return { playFrom, toggle, stop, listElevenVoices, GEMINI_VOICES, OPENAI_VOICES,
-    isActive: () => active };
+  return { playFrom, toggle, stop, listElevenVoices, listGeminiTtsModels,
+    setAdminGeminiModel, geminiModel, GEMINI_TTS_FALLBACKS,
+    GEMINI_VOICES, OPENAI_VOICES, isActive: () => active };
 })();
 
 /* ── 구절 주석 (책갈피·형광펜·밑줄, localStorage) ── */
@@ -1993,6 +2049,7 @@ function updateAuthUi() {
 }
 
 let adminData = null; // { profiles, usage, usageError, days } — 재렌더용
+let adminTtsSaved = ""; // app_settings 에 저장된 공통 Gemini 음성 모델
 
 async function openAdminPanel() {
   closePanels();
@@ -2007,9 +2064,55 @@ async function openAdminPanel() {
     $("sharedGemini").value = keys.gemini || "";
     $("sharedEleven").value = keys.elevenlabs || "";
     adminData = { profiles, usage: [], usageError: false, days: 30 };
+    fillAdminTtsModel();
     await loadAdminUsage();
   } catch (err) {
     box.textContent = (err && err.message) || "불러오지 못했습니다.";
+  }
+}
+
+/* ── 관리자: 음성(TTS) 공통 설정 ── */
+// 선택지는 "관리자 지정 모델 + 앱이 아는 모델 + ↻로 불러온 목록"을 합친 것
+let adminTtsModels = null; // [{id,label}] — ↻로 불러온 목록
+
+function fillAdminTtsModel() {
+  const sel = $("adminTtsModel");
+  const cur = adminTtsSaved;
+  sel.innerHTML = "";
+  const seen = {};
+  const add = (id, label) => {
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = label ? label + " (" + id + ")" : id;
+    sel.appendChild(o);
+  };
+  (adminTtsModels || []).forEach((m) => add(m.id, m.label));
+  Tts.GEMINI_TTS_FALLBACKS.forEach((id) => add(id, ""));
+  add(cur, "");
+  sel.value = cur || Tts.GEMINI_TTS_FALLBACKS[0];
+  $("adminTtsNote").textContent = adminTtsModels
+    ? "Gemini에서 불러온 낭독용 모델 " + adminTtsModels.length + "개"
+    : (adminTtsSaved ? "현재 공통 모델: " + adminTtsSaved
+      : "아직 지정하지 않음 — 앱 기본값(" + Tts.GEMINI_TTS_FALLBACKS[0] + ")을 씁니다.");
+}
+
+async function refreshAdminTtsModels() {
+  const btn = $("adminTtsRefresh");
+  btn.disabled = true;
+  $("adminTtsNote").textContent = "모델 목록을 불러오는 중…";
+  try {
+    const conf = AiTranslator.getSettings().gemini;
+    const key = await AiTranslator.resolveKey("gemini", conf);
+    adminTtsModels = await Tts.listGeminiTtsModels(key);
+    if (!adminTtsModels.length) throw new Error("낭독용 TTS 모델을 찾지 못했습니다.");
+    fillAdminTtsModel();
+    toast("TTS 모델 " + adminTtsModels.length + "개를 불러왔습니다");
+  } catch (err) {
+    $("adminTtsNote").textContent = (err && err.message) || "불러오지 못했습니다.";
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -2703,6 +2806,11 @@ function init() {
     if (Auth.user() && !visitLogged) {
       visitLogged = true;
       Auth.logUsage("visit"); // 하루 단위로 집계되는 접속 기록
+      // 관리자가 정한 공통 음성 모델을 받아 둔다 (없으면 앱 기본값 그대로)
+      Auth.getAppSetting("tts_gemini_model").then((v) => {
+        adminTtsSaved = v || "";
+        Tts.setAdminGeminiModel(adminTtsSaved);
+      });
     }
     if (Auth.user() && state.koSource !== "krv" &&
         document.querySelector("#reader .ai-error")) {
@@ -2724,6 +2832,23 @@ function init() {
       if (adminData) loadAdminUsage();
     });
     $("statCsv").addEventListener("click", exportUsageCsv);
+    $("adminTtsRefresh").addEventListener("click", refreshAdminTtsModels);
+    $("adminTtsSave").addEventListener("click", async () => {
+      const btn = $("adminTtsSave");
+      const model = $("adminTtsModel").value;
+      btn.disabled = true;
+      try {
+        await Auth.setAppSetting("tts_gemini_model", model);
+        adminTtsSaved = model;
+        Tts.setAdminGeminiModel(model);
+        fillAdminTtsModel();
+        toast("공통 음성 모델을 " + model + "로 저장했습니다");
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
     $("sharedKeysSave").addEventListener("click", async () => {
       const btn = $("sharedKeysSave");
       btn.disabled = true;

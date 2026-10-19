@@ -196,7 +196,7 @@
       <select id="ttsGeminiVoice"></select>
     </label>
     <label class="settings-field" id="ttsGeminiModelField" hidden>Gemini TTS 모델
-      <input id="ttsGeminiModel" type="text" placeholder="gemini-2.5-flash-preview-tts">
+      <input id="ttsGeminiModel" type="text" placeholder="비워 두면 관리자가 정한 최신 모델 사용">
     </label>
     <label class="settings-field" id="ttsElKeySourceField" hidden>ElevenLabs 키 사용 방식
       <select id="ttsElKeySource">
@@ -340,6 +340,21 @@
       placeholder="🔍 이메일 또는 이름으로 회원 검색" autocomplete="off">
     <div id="adminMembers" class="admin-members">불러오는 중…</div>
     <div class="admin-keys">
+      <div class="testament-label">음성 읽기 공통 설정</div>
+      <p class="settings-note">여기서 고른 Gemini 음성 모델이 <b>모든 회원의 기본값</b>이 됩니다
+        (회원이 설정에서 직접 모델을 적어 넣으면 그 값이 우선). ↻를 누르면 Gemini에서
+        현재 제공 중인 낭독용 TTS 모델 목록을 불러옵니다 — 실시간 대화 전용(Live) 모델은
+        낭독에 쓸 수 없어 목록에서 제외됩니다.</p>
+      <div class="settings-field">Gemini 음성 모델
+        <div class="model-row">
+          <select id="adminTtsModel"></select>
+          <button id="adminTtsRefresh" class="pager-btn" title="최신 TTS 모델 목록 불러오기">↻</button>
+        </div>
+        <p class="settings-note" id="adminTtsNote"></p>
+      </div>
+      <div class="settings-actions">
+        <button id="adminTtsSave" class="pager-btn primary">공통 음성 설정 저장</button>
+      </div>
       <div class="testament-label">공유 API 키</div>
       <label class="settings-field">OpenAI 공유 키
         <input id="sharedOpenai" type="password" placeholder="sk-... (비우고 저장하면 삭제)" autocomplete="off">

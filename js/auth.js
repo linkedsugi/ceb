@@ -106,6 +106,24 @@ const Auth = (() => {
     return data.api_key;
   }
 
+  // ── 공통 설정 (관리자가 정하고 모든 회원이 읽는다) ──
+  // app_settings 테이블이 아직 없거나 조회에 실패해도 앱은 기본값으로 동작해야 한다.
+  async function getAppSetting(key) {
+    if (!enabled || !sb) return null;
+    try {
+      const { data, error } = await sb
+        .from("app_settings").select("value").eq("key", key).maybeSingle();
+      if (error) return null;
+      return data ? data.value : null;
+    } catch (e) { return null; }
+  }
+
+  async function setAppSetting(key, value) {
+    const { error } = await sb.from("app_settings")
+      .upsert({ key, value, updated_at: new Date().toISOString() });
+    if (error) throw new Error("저장 실패: " + error.message);
+  }
+
   // ── 사용 통계 ──────────────────────────
   // 실패해도 앱 동작에 영향을 주지 않는 부가 기능이라 오류는 조용히 무시한다.
   function logUsage(event, detail) {
@@ -176,5 +194,6 @@ const Auth = (() => {
     signIn, signOut,
     getSharedKey, listProfiles, setApproved, setSharedAccess, setElevenAccess,
     getSharedKeys, upsertSharedKey, logUsage, fetchUsage,
+    getAppSetting, setAppSetting,
   };
 })();

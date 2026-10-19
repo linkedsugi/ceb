@@ -106,6 +106,26 @@ drop policy if exists "shared_keys admin write" on public.shared_keys;
 create policy "shared_keys admin write" on public.shared_keys
   for all using (public.is_admin()) with check (public.is_admin());
 
+-- ── 공통 설정 (관리자가 정하고 모든 회원이 읽는다) ──
+-- 예: tts_gemini_model = 'gemini-3.8-flash-tts'
+create table if not exists public.app_settings (
+  key text primary key,
+  value text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.app_settings enable row level security;
+
+-- 로그인한 회원이면 누구나 읽는다 (비밀 값은 여기 두지 않는다 — 키는 shared_keys)
+drop policy if exists "app_settings read" on public.app_settings;
+create policy "app_settings read" on public.app_settings
+  for select using (auth.uid() is not null);
+
+-- 쓰기는 관리자만
+drop policy if exists "app_settings admin write" on public.app_settings;
+create policy "app_settings admin write" on public.app_settings
+  for all using (public.is_admin()) with check (public.is_admin());
+
 -- ── 사용 통계 (회원별 · 일자별 집계) ─────────
 -- 원문 내용은 저장하지 않고 이벤트 횟수만 센다.
 create table if not exists public.usage_stats (

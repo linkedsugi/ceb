@@ -1,0 +1,10 @@
+{
+  "name": "bible-canvas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Bible Canvas — 영어·원어 성경과 한국어 번역 대조 읽기 웹앱 (정적 사이트)",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
