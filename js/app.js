@@ -393,13 +393,32 @@ const AiTranslator = (() => {
     }
   }
 
+  // 사용량·지출 한도로 막힌 오류인가 (한도 초과는 키를 바꿔도 소용없고 공급자를 바꿔야 한다)
+  function isQuotaError(err) {
+    const s = err && err.status;
+    const m = String((err && (err.apiMessage || err.message)) || "").toLowerCase();
+    if (s === 429) return true;
+    if (s === 403 && /quota|spending|exceed|billing/.test(m)) return true;
+    // status 가 실리지 않은 오류도 문구로 알아낸다
+    return /\b429\b|resource_exhausted|spending cap|quota exceeded/.test(m);
+  }
+
+  // 한도 초과 안내를 사람이 알아볼 수 있는 문장으로
+  function quotaNotice(provider, err) {
+    const name = provider === "gemini" ? "Google Gemini" : "OpenAI";
+    const cap = /spending cap|billing/i.test(String((err && (err.apiMessage || err.message)) || ""));
+    return name + (cap ? " 월 지출 한도를 모두 썼습니다." : " 사용량 한도에 걸렸습니다.") +
+      " 관리자가 결제·한도 설정을 확인해야 합니다" +
+      (provider === "gemini" ? " (AI Studio → Spend)." : ".");
+  }
+
   // 장 전체를 한 번의 요청으로 번역해 절 배열을 반환
   async function translateChapter(version, book, chapter, meta, enVerses) {
     const picked = current();
-    const provider = picked.provider;
-    const conf = picked.conf;
+    let provider = picked.provider;
+    let conf = picked.conf;
     const apiKey = await resolveKey(provider, conf);
-    const ck = cacheKey(version, book, chapter, provider + ":" + conf.model);
+    let ck = cacheKey(version, book, chapter, provider + ":" + conf.model);
     if (memCache[ck]) return memCache[ck];
     try {
       const stored = JSON.parse(localStorage.getItem(ck));
@@ -430,14 +449,15 @@ const AiTranslator = (() => {
 
     // 모델(특히 GPT-5 계열)에 따라 temperature나 response_format을 거부하므로
     // 최소 파라미터로 요청하고, response_format이 거부되면 없이 재시도한다.
-    async function call(useJsonFormat) {
-      const body = { model: conf.model, messages };
+    async function call(useJsonFormat, cf, key) {
+      cf = cf || conf;
+      const body = { model: cf.model, messages };
       if (useJsonFormat) body.response_format = { type: "json_object" };
-      const res = await fetch(conf.base + "/chat/completions", {
+      const res = await fetch(cf.base + "/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer " + apiKey,
+          "Authorization": "Bearer " + (key || apiKey),
         },
         body: JSON.stringify(body),
       });
@@ -449,7 +469,7 @@ const AiTranslator = (() => {
         } catch (e) { /* 무시 */ }
         let text;
         if (res.status === 401) text = "AI API 키가 거부되었습니다(401). ⚙️ 설정에서 키를 확인해 주세요.";
-        else if (res.status === 404) text = "모델 「" + conf.model + "」을 찾을 수 없습니다(404). ↻로 모델 목록을 새로고침해 주세요.";
+        else if (res.status === 404) text = "모델 「" + cf.model + "」을 찾을 수 없습니다(404). ↻로 모델 목록을 새로고침해 주세요.";
         else if (res.status === 429) text = "AI API 사용량 한도에 도달했습니다(429). 잠시 후 다시 시도해 주세요.";
         else text = "AI 번역 요청 실패 (" + res.status + ")";
         if (apiMsg) text += " — " + apiMsg;
@@ -461,23 +481,43 @@ const AiTranslator = (() => {
       return res.json();
     }
 
-    let content;
-    if (provider === "gemini") {
-      content = await callGemini(conf, apiKey, messages);
-    } else {
+    async function runOpenai(cf, key) {
       let json;
       try {
-        json = await call(true);
+        json = await call(true, cf, key);
       } catch (err) {
         // response_format을 지원하지 않는 모델/게이트웨이면 없이 다시 시도
         if (err.status === 400 && /response_format|json_object/i.test(err.apiMessage || "")) {
-          json = await call(false);
+          json = await call(false, cf, key);
         } else {
           throw err;
         }
       }
-      content = json.choices && json.choices[0] && json.choices[0].message &&
+      return json.choices && json.choices[0] && json.choices[0].message &&
         json.choices[0].message.content;
+    }
+    const runWith = (prov, cf, key) =>
+      prov === "gemini" ? callGemini(cf, key, messages) : runOpenai(cf, key);
+
+    let content;
+    try {
+      content = await runWith(provider, conf, apiKey);
+    } catch (err) {
+      // 한도 초과라면 키가 있는 다른 공급자로 자동 우회한다 (서비스가 멈추지 않도록)
+      if (!isQuotaError(err)) throw err;
+      const other = provider === "openai" ? "gemini" : "openai";
+      const s = getSettings();
+      let otherKey = null;
+      try { otherKey = await resolveKey(other, s[other]); } catch (e) { otherKey = null; }
+      if (!otherKey) throw new Error(quotaNotice(provider, err));
+      if (typeof toast === "function") {
+        toast(quotaNotice(provider, err) + " " +
+          (other === "openai" ? "OpenAI" : "Gemini") + "로 번역합니다.");
+      }
+      content = await runWith(other, s[other], otherKey);
+      provider = other;
+      conf = s[other];
+      ck = cacheKey(version, book, chapter, provider + ":" + conf.model);
     }
     if (!content) throw new Error("AI 응답이 비어 있습니다.");
 
@@ -510,6 +550,33 @@ const AiTranslator = (() => {
     return verses;
   }
 
+  // 상태 점검용 최소 호출. 모델 목록 조회는 한도와 무관하게 성공하므로
+  // 실제로 쓸 수 있는지 보려면 생성 요청을 한 번 보내야 한다 (토큰 몇 개 수준).
+  async function ping(provider, conf, apiKey) {
+    let res;
+    if (provider === "gemini") {
+      res = await fetch(GEMINI_BASE + "/models/" + encodeURIComponent(conf.model) +
+        ":generateContent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "ping" }] }] }),
+      });
+    } else {
+      res = await fetch(conf.base + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        body: JSON.stringify({ model: conf.model, messages: [{ role: "user", content: "ping" }] }),
+      });
+    }
+    if (res.ok) return true;
+    let msg = "";
+    try { const j = await res.json(); msg = (j.error && j.error.message) || j.message || ""; } catch (e) { /* 무시 */ }
+    const err = new Error("응답 " + res.status + (msg ? " — " + msg : ""));
+    err.status = res.status;
+    err.apiMessage = msg;
+    throw err;
+  }
+
   // 현재 선택된 공급자·모델 표시용 정보
   function info() {
     const picked = current();
@@ -521,6 +588,7 @@ const AiTranslator = (() => {
   }
 
   return { getSettings, saveSettings, configured, translateChapter, clearCache,
+    isQuotaError, ping,
     listModels, info, resolveKey };
 })();
 
@@ -650,6 +718,9 @@ const Tts = (() => {
           let msg = "";
           try { const j = await res.json(); msg = (j.error && j.error.message) || ""; } catch (e) { /* 무시 */ }
           lastErr = new Error("Gemini 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+          lastErr.status = res.status;
+          lastErr.apiMessage = msg;
+          if (AiTranslator.isQuotaError(lastErr)) throw lastErr; // 한도는 모델을 바꿔도 소용없다
           if (res.status === 400 && m + 1 < modes.length) continue; // style 미지원 — 빼고 재시도
           if (res.status === 404 || res.status === 400) break;      // 모델 문제 — 다음 후보로
           throw lastErr;
@@ -707,7 +778,10 @@ const Tts = (() => {
     if (!res.ok) {
       let msg = "";
       try { const j = await res.json(); msg = (j.error && j.error.message) || j.message || ""; } catch (e) { /* 무시 */ }
-      throw new Error("OpenAI 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+      const err = new Error("OpenAI 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+      err.status = res.status;
+      err.apiMessage = msg;
+      throw err;
     }
     return URL.createObjectURL(await res.blob());
   }
@@ -740,7 +814,10 @@ const Tts = (() => {
         msg = (j.detail && (j.detail.message || j.detail)) || j.message || "";
         if (typeof msg !== "string") msg = JSON.stringify(msg);
       } catch (e) { /* 무시 */ }
-      throw new Error("ElevenLabs 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+      const err = new Error("ElevenLabs 음성 합성 실패 (" + res.status + (msg ? ": " + msg : "") + ")");
+      err.status = res.status;
+      err.apiMessage = msg;
+      throw err;
     }
     return URL.createObjectURL(await res.blob());
   }
@@ -789,10 +866,30 @@ const Tts = (() => {
     return synthOpenai(item.text);
   }
 
+  // 한도 초과로 막히면 키가 있는 다른 공급자로 한 번 갈아타고 계속 읽는다
+  let failoverDone = false;
+  async function synthWithFailover(i) {
+    try {
+      return await synth(i);
+    } catch (err) {
+      const from = currentProvider;
+      if (failoverDone || !AiTranslator.isQuotaError(err)) throw err;
+      const alt = ["openai", "gemini"].filter((p) => p !== from && hasKey(p));
+      if (!alt.length) throw err;
+      failoverDone = true;
+      currentProvider = alt[0];
+      toast((from === "gemini" ? "Gemini" : from === "openai" ? "OpenAI" : "ElevenLabs") +
+        " 한도 초과 — " + (currentProvider === "openai" ? "OpenAI" : "Gemini") +
+        " 음성으로 이어서 읽습니다");
+      Auth.logUsage("tts", currentProvider);
+      return synth(i);
+    }
+  }
+
   function getUrl(i) {
     if (urlCache[i]) return Promise.resolve(urlCache[i]);
     if (!pending[i]) {
-      pending[i] = synth(i).then((u) => { urlCache[i] = u; return u; });
+      pending[i] = synthWithFailover(i).then((u) => { urlCache[i] = u; return u; });
       pending[i].catch(() => { delete pending[i]; });
     }
     return pending[i];
@@ -969,6 +1066,7 @@ const Tts = (() => {
     stop();
     session++;
     const my = session;
+    failoverDone = false; // 재생마다 한 번은 다시 우회를 시도한다
     primeAudio(); // 터치 컨텍스트 안에서 오디오 재생 권한 확보
     buildQueue(fromVerse || 1).then((items) => {
       if (my !== session) return;
@@ -2071,6 +2169,84 @@ async function openAdminPanel() {
   }
 }
 
+/* ── 관리자: 서비스 상태 점검 ── */
+// 각 공급자에 가장 싼 요청을 보내 실제로 쓸 수 있는 상태인지 확인한다.
+async function runHealthCheck() {
+  const box = $("healthBox");
+  const btn = $("healthRun");
+  btn.disabled = true;
+  box.innerHTML = "";
+  const rows = [];
+  const add = (name, state, detail) => {
+    rows.push({ name, state, detail });
+    render();
+  };
+  function render() {
+    box.innerHTML = "";
+    rows.forEach((r) => {
+      const row = el("div", "health-row " + r.state);
+      row.appendChild(el("span", "health-mark",
+        r.state === "ok" ? "✅" : r.state === "warn" ? "⚠️" : "❌"));
+      row.appendChild(el("span", "health-name", r.name));
+      row.appendChild(el("span", "health-detail", r.detail));
+      box.appendChild(row);
+    });
+  }
+  box.appendChild(el("div", "settings-note", "점검 중…"));
+
+  // 1) 로그인·데이터베이스 (지금 이 패널이 열렸다는 것 자체가 통과 신호)
+  try {
+    await Auth.listProfiles();
+    add("Supabase (로그인·회원)", "ok", "정상");
+  } catch (e) {
+    add("Supabase (로그인·회원)", "bad", (e && e.message) || "응답 없음 — 프로젝트가 중지됐을 수 있습니다");
+  }
+
+  // 2) 공통 설정 테이블 (schema.sql 최신본 실행 여부)
+  try {
+    await Auth.getAppSetting("tts_gemini_model");
+    add("app_settings 테이블", "ok", "사용 가능");
+  } catch (e) {
+    add("app_settings 테이블", "warn", "없음 — schema.sql 최신본을 SQL Editor에서 한 번 실행하세요");
+  }
+
+  // 3) AI 공급자 — 모델 목록 조회로 키·한도 상태를 확인
+  const s = AiTranslator.getSettings();
+  for (const prov of ["openai", "gemini"]) {
+    const label = prov === "openai" ? "OpenAI (번역·음성)" : "Gemini (번역·음성)";
+    let key = null;
+    try {
+      key = await AiTranslator.resolveKey(prov, s[prov]);
+    } catch (e) {
+      add(label, "warn", "키 없음 — " + ((e && e.message) || ""));
+      continue;
+    }
+    try {
+      await AiTranslator.ping(prov, s[prov], key);
+      add(label, "ok", "정상 (" + s[prov].model + ")");
+    } catch (e) {
+      const quota = AiTranslator.isQuotaError(e);
+      add(label, quota ? "bad" : "warn",
+        (quota ? "사용량·지출 한도 초과 — 결제 설정을 확인하세요. " : "") +
+        ((e && e.message) || "요청 실패"));
+    }
+  }
+
+  // 4) 본문 API
+  try {
+    await CebApi.chapter("niv", 43, 3);
+    add("YouVersion (온라인 본문)", "ok", "정상");
+  } catch (e) {
+    add("YouVersion (온라인 본문)", "warn", (e && e.message) || "조회 실패");
+  }
+
+  const bad = rows.filter((r) => r.state === "bad").length;
+  box.appendChild(el("div", "settings-note",
+    bad ? "❌ 항목이 지금 서비스가 멈춘 원인일 가능성이 큽니다."
+      : "모든 핵심 항목이 정상입니다."));
+  btn.disabled = false;
+}
+
 /* ── 관리자: 음성(TTS) 공통 설정 ── */
 // 선택지는 "관리자 지정 모델 + 앱이 아는 모델 + ↻로 불러온 목록"을 합친 것
 let adminTtsModels = null; // [{id,label}] — ↻로 불러온 목록
@@ -2832,6 +3008,7 @@ function init() {
       if (adminData) loadAdminUsage();
     });
     $("statCsv").addEventListener("click", exportUsageCsv);
+    $("healthRun").addEventListener("click", runHealthCheck);
     $("adminTtsRefresh").addEventListener("click", refreshAdminTtsModels);
     $("adminTtsSave").addEventListener("click", async () => {
       const btn = $("adminTtsSave");

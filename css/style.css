@@ -455,6 +455,18 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .tts-bar .pager-btn { padding: 6px 12px; }
 
+/* ── 관리자 상태 점검 ─────────────────── */
+.health-box { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+.health-row {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 8px;
+  padding: 7px 10px; border-radius: 8px; background: var(--bg);
+  border: 1px solid var(--border); font-size: 0.82rem;
+}
+.health-row.bad { border-color: #d43535; }
+.health-mark { grid-row: span 2; line-height: 1.3; }
+.health-name { font-weight: 700; }
+.health-detail { color: var(--text-sub); font-size: 0.78rem; line-height: 1.5; }
+
 /* ── 1년 1독 통독표 ──────────────────── */
 .plan-chip {
   font-size: 0.78rem; font-weight: 600; color: var(--text-sub);
