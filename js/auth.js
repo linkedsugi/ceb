@@ -67,7 +67,35 @@ const Auth = (() => {
     return isAdmin() || !!(profile && profile.approved && profile.elevenlabs_access);
   }
 
+  // 인증 서버가 살아 있는지 확인한다.
+  // signInWithOAuth 는 브라우저를 Supabase 주소로 보내기 때문에, 프로젝트가 멈춰 있으면
+  // 사용자는 아무 설명 없는 "사이트에 연결할 수 없음" 화면을 보게 된다.
+  async function probe(timeoutMs) {
+    if (!enabled) return { ok: false, detail: "로그인 기능이 설정되지 않았습니다" };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 7000);
+    try {
+      const res = await fetch(SUPABASE_URL + "/auth/v1/health", {
+        headers: { apikey: SUPABASE_ANON_KEY },
+        signal: ctrl.signal,
+      });
+      if (res.ok) return { ok: true, status: res.status };
+      return { ok: false, status: res.status, detail: "응답 " + res.status };
+    } catch (e) {
+      return { ok: false, status: 0,
+        detail: e && e.name === "AbortError" ? "응답 없음(시간 초과)" : "연결 실패" };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function signIn() {
+    const p = await probe();
+    if (!p.ok) {
+      throw new Error("로그인 서버에 연결할 수 없습니다 (" + (p.detail || "원인 불명") + "). " +
+        "Supabase 프로젝트가 일시정지됐을 수 있습니다 — 관리자에게 문의해 주세요. " +
+        "로그인 없이도 성경 읽기·검색·책갈피·통독표는 그대로 쓸 수 있습니다.");
+    }
     await sb.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: location.origin + location.pathname },
@@ -194,6 +222,6 @@ const Auth = (() => {
     signIn, signOut,
     getSharedKey, listProfiles, setApproved, setSharedAccess, setElevenAccess,
     getSharedKeys, upsertSharedKey, logUsage, fetchUsage,
-    getAppSetting, setAppSetting,
+    getAppSetting, setAppSetting, probe,
   };
 })();

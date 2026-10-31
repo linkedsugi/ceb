@@ -455,6 +455,16 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .tts-bar .pager-btn { padding: 6px 12px; }
 
+/* ── 안내 띠 (사라지지 않는 알림) ───────── */
+.banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 14px; font-size: 0.86rem; line-height: 1.6;
+  background: var(--accent-soft); color: var(--text);
+  border-bottom: 1px solid var(--accent);
+}
+.banner .icon-btn { margin-left: auto; flex: none; padding: 2px 6px; }
+#bannerText { min-width: 0; }
+
 /* ── 관리자 상태 점검 ─────────────────── */
 .health-box { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
 .health-row {

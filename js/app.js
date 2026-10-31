@@ -1488,6 +1488,14 @@ function el(tag, cls, text) {
   return n;
 }
 
+// 중요한 안내는 토스트 대신 띠로 남겨 둔다 (사용자가 읽고 직접 닫는다)
+function showBanner(msg) {
+  const b = $("banner");
+  if (!b) return;
+  $("bannerText").textContent = msg;
+  b.hidden = false;
+}
+
 let toastTimer = null;
 function toast(msg) {
   const t = $("toast");
@@ -2194,15 +2202,22 @@ async function runHealthCheck() {
   }
   box.appendChild(el("div", "settings-note", "점검 중…"));
 
-  // 1) 로그인·데이터베이스 (지금 이 패널이 열렸다는 것 자체가 통과 신호)
+  // 1) 인증 서버 — 로그인 버튼이 바로 이 주소로 이동한다
+  const p = await Auth.probe();
+  add("Supabase 인증 서버 (로그인)", p.ok ? "ok" : "bad",
+    p.ok ? "정상 — 로그인 가능"
+      : (p.detail || "응답 없음") + " — 프로젝트가 일시정지됐을 수 있습니다. " +
+        "이 상태면 로그인 버튼이 접속 불가 화면으로 갑니다.");
+
+  // 2) 회원 데이터베이스
   try {
     await Auth.listProfiles();
-    add("Supabase (로그인·회원)", "ok", "정상");
+    add("Supabase 데이터베이스 (회원)", "ok", "정상");
   } catch (e) {
-    add("Supabase (로그인·회원)", "bad", (e && e.message) || "응답 없음 — 프로젝트가 중지됐을 수 있습니다");
+    add("Supabase 데이터베이스 (회원)", "bad", (e && e.message) || "조회 실패");
   }
 
-  // 2) 공통 설정 테이블 (schema.sql 최신본 실행 여부)
+  // 3) 공통 설정 테이블 (schema.sql 최신본 실행 여부)
   try {
     await Auth.getAppSetting("tts_gemini_model");
     add("app_settings 테이블", "ok", "사용 가능");
@@ -2210,7 +2225,7 @@ async function runHealthCheck() {
     add("app_settings 테이블", "warn", "없음 — schema.sql 최신본을 SQL Editor에서 한 번 실행하세요");
   }
 
-  // 3) AI 공급자 — 모델 목록 조회로 키·한도 상태를 확인
+  // 4) AI 공급자 — 모델 목록 조회로 키·한도 상태를 확인
   const s = AiTranslator.getSettings();
   for (const prov of ["openai", "gemini"]) {
     const label = prov === "openai" ? "OpenAI (번역·음성)" : "Gemini (번역·음성)";
@@ -2232,7 +2247,7 @@ async function runHealthCheck() {
     }
   }
 
-  // 4) 본문 API
+  // 5) 본문 API
   try {
     await CebApi.chapter("niv", 43, 3);
     add("YouVersion (온라인 본문)", "ok", "정상");
@@ -2995,8 +3010,14 @@ function init() {
   });
   if (Auth.enabled()) {
     $("loginBtn").hidden = false;
-    $("loginBtn").addEventListener("click", () =>
-      Auth.signIn().catch((e) => toast(e.message || "로그인 실패")));
+    $("loginBtn").addEventListener("click", () => {
+      const btn = $("loginBtn");
+      btn.disabled = true;
+      Auth.signIn()
+        .catch((e) => showBanner("⚠️ " + (e.message || "로그인에 실패했습니다.")))
+        .finally(() => { btn.disabled = false; });
+    });
+    $("bannerClose").addEventListener("click", () => { $("banner").hidden = true; });
     $("logoutBtn").addEventListener("click", () =>
       Auth.signOut().then(() => toast("로그아웃되었습니다")));
     $("adminBtn").addEventListener("click", openAdminPanel);
